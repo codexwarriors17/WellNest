@@ -1,99 +1,97 @@
 // src/pages/MoodTrackingPage.jsx
 import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
-import { getMoodLogs } from '../firebase/firebaseFunctions'
-import { MOODS, getMoodEmoji, getMoodColor } from '../services/moodService'
+import { MOODS, getMoodEmoji, getUserMoodLogs } from '../services/moodService'
 import { formatDate, formatTime } from '../utils/dateUtils'
 import MoodTracker from '../components/MoodTracker'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, AreaChart, Area } from 'recharts'
-
-const MOOD_VALS = { great: 5, good: 4, neutral: 3, sad: 2, terrible: 1 }
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 
 export default function MoodTrackingPage() {
+  const { t } = useTranslation()
   const { user } = useAuth()
   const [logs, setLogs] = useState([])
   const [loading, setLoading] = useState(true)
-  const [view, setView] = useState('log')
+  const [view, setView] = useState('list') // 'list' | 'stats'
 
   const fetchLogs = async () => {
     if (!user) return
     setLoading(true)
-    try { const data = await getMoodLogs(user.uid, 30); setLogs(data) }
-    catch {} finally { setLoading(false) }
+    try {
+      const data = await getUserMoodLogs(30)
+      setLogs(data)
+    } catch {}
+    setLoading(false)
   }
 
   useEffect(() => { fetchLogs() }, [user])
 
-  const moodCounts = MOODS.map(mood => ({ ...mood, count: logs.filter(l => l.mood === mood.id).length }))
-  const mostCommon = moodCounts.reduce((a, b) => a.count > b.count ? a : b, moodCounts[0])
-  const avgScore = logs.length ? (logs.reduce((s, l) => s + (MOOD_VALS[l.mood] || 3), 0) / logs.length).toFixed(1) : '—'
-  const positiveRate = logs.length ? Math.round(logs.filter(l => ['great','good'].includes(l.mood)).length / logs.length * 100) : 0
-
-  const trendData = logs.slice(0, 14).reverse().map(log => ({
-    date: log.timestamp?.toDate ? new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' }).format(log.timestamp.toDate()) : '',
-    value: MOOD_VALS[log.mood] || 3,
-    mood: log.mood,
-    emoji: getMoodEmoji(log.mood),
+  // Stats
+  const moodCounts = MOODS.map(mood => ({
+    ...mood,
+    count: logs.filter(l => l.mood === mood.id).length,
   }))
 
-  const TABS = [
-    { id: 'log', label: '➕ Log Mood' },
-    { id: 'history', label: `📋 History (${logs.length})` },
-    { id: 'stats', label: '📊 Stats' },
-  ]
+  const mostCommon = moodCounts.reduce((a, b) => a.count > b.count ? a : b, moodCounts[0])
 
   return (
-    <div className="page-container">
-      <div className="content-wrapper">
-        <div className="animate-fade-up">
-          <h1 className="font-display text-3xl text-slate-900">Mood Tracker</h1>
+    <div className="min-h-screen bg-slate-50 pt-20 pb-10 page-enter">
+      <div className="max-w-3xl mx-auto px-4 space-y-6">
+
+        <div>
+          <h1 className="font-display text-3xl text-slate-800">{t('moodTracker')}</h1>
           <p className="text-slate-500 text-sm mt-1">Track and understand your emotional patterns</p>
         </div>
 
-        {/* Tabs */}
-        <div className="flex gap-1 bg-white rounded-2xl p-1 w-fit shadow-sm border border-slate-100 animate-fade-up delay-100">
-          {TABS.map(tab => (
-            <button key={tab.id} onClick={() => setView(tab.id)}
-              className={`px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all duration-200 ${
-                view === tab.id ? 'bg-sky-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
-              }`}>{tab.label}
+        {/* Log mood */}
+        <div className="card">
+          <MoodTracker onMoodSaved={fetchLogs} />
+        </div>
+
+        {/* Toggle */}
+        <div className="flex gap-1 bg-white rounded-2xl p-1 shadow-card w-fit">
+          {['list', 'stats'].map(v => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 capitalize ${
+                view === v ? 'bg-sky-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              {v === 'list' ? '📋 History' : '📊 Stats'}
             </button>
           ))}
         </div>
 
-        {/* Log tab */}
-        {view === 'log' && (
-          <div className="card animate-fade-up delay-100"><MoodTracker onMoodSaved={fetchLogs} /></div>
-        )}
-
-        {/* History tab */}
-        {view === 'history' && (
-          <div className="card animate-fade-up">
-            <h2 className="font-display text-lg text-slate-800 mb-4">Mood History</h2>
+        {view === 'list' ? (
+          <div className="card">
+            <h2 className="font-display text-lg text-slate-800 mb-4">{t('moodHistory')}</h2>
             {loading ? (
-              <div className="space-y-2">{[...Array(5)].map((_, i) => <div key={i} className="h-14 shimmer rounded-2xl" />)}</div>
+              <div className="flex justify-center py-12">
+                <div className="w-6 h-6 border-2 border-sky-300 border-t-sky-600 rounded-full animate-spin" />
+              </div>
             ) : logs.length === 0 ? (
               <div className="text-center py-12">
-                <div className="text-5xl mb-3 opacity-40">🌱</div>
-                <p className="text-slate-400 text-sm">No logs yet. Start tracking your mood!</p>
+                <div className="text-5xl mb-3">🌱</div>
+                <p className="text-slate-500">{t('noLogsYet')}</p>
               </div>
             ) : (
-              <div className="space-y-2 max-h-[500px] overflow-y-auto">
-                {logs.map((log, i) => {
+              <div className="space-y-2">
+                {logs.map(log => {
                   const mood = MOODS.find(m => m.id === log.mood)
                   return (
-                    <div key={log.id} className={`flex items-start gap-3 p-3.5 rounded-2xl hover:bg-slate-50 transition-colors animate-slide-in delay-${Math.min(i * 50, 400)}`}
-                      style={{ borderLeft: `3px solid ${mood?.color || '#0ea5e9'}` }}>
-                      <span className="text-2xl leading-none mt-0.5">{getMoodEmoji(log.mood)}</span>
+                    <div
+                      key={log.id}
+                      className="flex items-start gap-3 p-3 rounded-xl hover:bg-slate-50 transition-colors group"
+                      style={{ borderLeft: `3px solid ${mood?.color || '#0ea5e9'}` }}
+                    >
+                      <span className="text-2xl">{getMoodEmoji(log.mood)}</span>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold text-slate-800 text-sm capitalize">{log.mood}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-slate-700 capitalize">{log.mood}</span>
                           <span className="text-xs text-slate-400">{formatDate(log.timestamp)} · {formatTime(log.timestamp)}</span>
                         </div>
-                        {log.note && <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">{log.note}</p>}
-                      </div>
-                      <div className="w-6 h-6 rounded-full flex-shrink-0 mt-0.5" style={{ backgroundColor: `${mood?.color}20`, border: `1.5px solid ${mood?.color}40` }}>
-                        <div className="w-full h-full rounded-full" style={{ background: mood?.color, opacity: 0.6, transform: `scale(${MOOD_VALS[log.mood] / 5})`, transformOrigin: 'center', transition: 'transform 0.3s' }} />
+                        {log.note && <p className="text-sm text-slate-500 mt-0.5">{log.note}</p>}
                       </div>
                     </div>
                   )
@@ -101,60 +99,46 @@ export default function MoodTrackingPage() {
               </div>
             )}
           </div>
-        )}
-
-        {/* Stats tab */}
-        {view === 'stats' && (
-          <div className="space-y-5 animate-fade-up">
-            {/* Summary cards */}
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                { icon: getMoodEmoji(mostCommon?.id), label: 'Most Common', value: mostCommon?.label || '—', color: 'from-sky-50 to-cyan-50' },
-                { icon: '📈', label: 'Avg Mood', value: `${avgScore}/5`, color: 'from-violet-50 to-purple-50' },
-                { icon: '☀️', label: 'Positive Days', value: `${positiveRate}%`, color: 'from-amber-50 to-yellow-50' },
-              ].map((s, i) => (
-                <div key={i} className={`bg-gradient-to-br ${s.color} rounded-2xl p-4 text-center border border-white/80`}>
-                  <div className="text-2xl mb-1">{s.icon}</div>
-                  <div className="stat-number text-xl">{s.value}</div>
-                  <div className="text-xs text-slate-500 mt-0.5">{s.label}</div>
+        ) : (
+          <div className="space-y-4">
+            {/* Summary card */}
+            {logs.length > 0 && (
+              <div className="card bg-gradient-to-br from-sky-50 to-white">
+                <div className="grid grid-cols-3 gap-4 text-center">
+                  <div>
+                    <div className="text-3xl">{getMoodEmoji(mostCommon?.id)}</div>
+                    <div className="text-xs text-slate-500 mt-1">Most common</div>
+                    <div className="text-sm font-semibold text-slate-700 capitalize">{mostCommon?.id}</div>
+                  </div>
+                  <div>
+                    <div className="font-display text-2xl text-sky-600">{logs.length}</div>
+                    <div className="text-xs text-slate-500 mt-1">Total logs</div>
+                  </div>
+                  <div>
+                    <div className="font-display text-2xl text-sky-600">
+                      {Math.round(logs.filter(l => ['great', 'good'].includes(l.mood)).length / logs.length * 100)}%
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1">Positive days</div>
+                  </div>
                 </div>
-              ))}
-            </div>
-
-            {/* Trend chart */}
-            {trendData.length >= 2 && (
-              <div className="card">
-                <h3 className="font-display text-lg text-slate-800 mb-4">14-Day Mood Trend</h3>
-                <ResponsiveContainer width="100%" height={180}>
-                  <AreaChart data={trendData}>
-                    <defs>
-                      <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.15}/>
-                        <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                    <YAxis domain={[1,5]} ticks={[1,2,3,4,5]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={18} />
-                    <Tooltip contentStyle={{ borderRadius: '16px', fontSize: 12, border: '1px solid #f1f5f9' }}
-                      formatter={(val, _, props) => [props.payload.emoji, props.payload.mood]} />
-                    <Area type="monotone" dataKey="value" stroke="#0ea5e9" strokeWidth={2.5}
-                      fill="url(#g1)" dot={{ fill: '#0ea5e9', r: 3.5, strokeWidth: 0 }}
-                      activeDot={{ r: 6, fill: '#0284c7', stroke: '#fff', strokeWidth: 2 }} />
-                  </AreaChart>
-                </ResponsiveContainer>
               </div>
             )}
 
-            {/* Distribution chart */}
+            {/* Bar chart */}
             <div className="card">
               <h3 className="font-display text-lg text-slate-800 mb-4">Mood Distribution</h3>
-              <ResponsiveContainer width="100%" height={180}>
-                <BarChart data={moodCounts} barSize={28}>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={moodCounts} barSize={32}>
                   <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={20} />
-                  <Tooltip contentStyle={{ borderRadius: '16px', fontSize: 12, border: '1px solid #f1f5f9' }} formatter={v => [v, 'times']} />
-                  <Bar dataKey="count" radius={[8, 8, 0, 0]}>
-                    {moodCounts.map(entry => <Cell key={entry.id} fill={entry.color} opacity={entry.count > 0 ? 1 : 0.2} />)}
+                  <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={25} />
+                  <Tooltip
+                    contentStyle={{ borderRadius: '12px', border: '1px solid #f1f5f9', fontSize: 12 }}
+                    formatter={(val) => [val, 'times']}
+                  />
+                  <Bar dataKey="count" radius={[6, 6, 0, 0]}>
+                    {moodCounts.map(entry => (
+                      <Cell key={entry.id} fill={entry.color} opacity={entry.count > 0 ? 1 : 0.3} />
+                    ))}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>

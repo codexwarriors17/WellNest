@@ -15,7 +15,7 @@ import {
 import {
   doc, setDoc, getDoc, updateDoc, collection,
   addDoc, getDocs, query, where, orderBy, limit,
-  serverTimestamp, deleteDoc
+  serverTimestamp, deleteDoc, increment
 } from 'firebase/firestore'
 import { auth, db } from './firebaseConfig'
 
@@ -48,7 +48,6 @@ export const loginWithGoogle = async () => {
 
 export const loginAnonymously = async () => {
   const cred = await signInAnonymously(auth)
-  // Create a minimal guest profile
   await setDoc(doc(db, 'users', cred.user.uid), {
     uid: cred.user.uid,
     email: null,
@@ -57,12 +56,12 @@ export const loginAnonymously = async () => {
     createdAt: serverTimestamp(),
     streak: 0,
     totalLogs: 0,
+    positiveDays: 0,
     language: 'en',
   }, { merge: true })
   return cred.user
 }
 
-// Upgrade anonymous account → email/password
 export const linkAnonWithEmail = async (email, password, displayName) => {
   const credential = EmailAuthProvider.credential(email, password)
   const cred = await linkWithCredential(auth.currentUser, credential)
@@ -76,7 +75,6 @@ export const linkAnonWithEmail = async (email, password, displayName) => {
   return cred.user
 }
 
-// Upgrade anonymous account → Google
 export const linkAnonWithGoogle = async () => {
   const cred = await linkWithPopup(auth.currentUser, googleProvider)
   await updateDoc(doc(db, 'users', cred.user.uid), {
@@ -90,21 +88,24 @@ export const linkAnonWithGoogle = async () => {
 }
 
 export const logout = () => signOut(auth)
-
 export const resetPassword = (email) => sendPasswordResetEmail(auth, email)
 
 // ── USER PROFILE ──────────────────────────────────────
 
 export const createUserProfile = async (user, extra = {}) => {
   await setDoc(doc(db, 'users', user.uid), {
-    uid: user.uid,
-    email: user.email,
-    displayName: user.displayName || extra.displayName || 'Friend',
-    photoURL: user.photoURL || null,
+    uid:         user.uid,
+    email:       user.email || null,
+    displayName: user.displayName || extra.displayName || 'User',
+    photoURL:    user.photoURL || null,
     isAnonymous: false,
-    createdAt: serverTimestamp(),
-    streak: 0,
-    totalLogs: 0,
+    onboarded:   false,
+    streak:      0,
+    totalLogs:   0,
+    positiveDays: 0,
+    loggedAfterBadDay: false,
+    createdAt:   serverTimestamp(),
+    language:    extra.language || 'en',
     ...extra,
   }, { merge: true })
 }
@@ -121,17 +122,45 @@ export const updateUserProfile = async (uid, data) => {
 // ── MOOD LOGS ─────────────────────────────────────────
 
 export const saveMoodLog = async (uid, moodData) => {
+  // 1. Save the log
   const ref = await addDoc(collection(db, 'moodLogs'), {
     uid,
     ...moodData,
     timestamp: serverTimestamp(),
   })
-  const userRef = doc(db, 'users', uid)
+
+  // 2. Update user stats atomically
+  const userRef  = doc(db, 'users', uid)
   const userSnap = await getDoc(userRef)
-  if (userSnap.exists()) {
-    const data = userSnap.data()
-    await updateDoc(userRef, { totalLogs: (data.totalLogs || 0) + 1 })
+  if (!userSnap.exists()) return ref.id
+
+  const data    = userSnap.data()
+  const today   = new Date().toDateString()
+  const yesterday = new Date(Date.now() - 86400000).toDateString()
+
+  // Streak logic
+  let newStreak = 1
+  if (data.lastLogDate === yesterday) {
+    newStreak = (data.streak || 0) + 1
+  } else if (data.lastLogDate === today) {
+    newStreak = data.streak || 1  // already logged today, keep streak
   }
+
+  // Badge stats
+  const isPositive = ['great', 'good'].includes(moodData.mood)
+  const prevMoodWasBad = data.lastMood === 'terrible'
+  const loggedAfterBadDay = prevMoodWasBad && moodData.mood !== 'terrible'
+
+  await updateDoc(userRef, {
+    totalLogs:    increment(1),
+    streak:       newStreak,
+    lastLogDate:  today,
+    lastMood:     moodData.mood,
+    ...(isPositive && { positiveDays: increment(1) }),
+    ...(loggedAfterBadDay && { loggedAfterBadDay: true }),
+    updatedAt:    serverTimestamp(),
+  })
+
   return ref.id
 }
 
@@ -171,33 +200,41 @@ export const getChatHistory = async (uid, limitCount = 50) => {
   return snap.docs.map(d => ({ id: d.id, ...d.data() }))
 }
 
-// ── AI MOOD ANALYSIS ──────────────────────────────────
+// ── MOOD ANALYSIS ─────────────────────────────────────
 
 export const analyzeMoodTrend = (logs) => {
-  if (!logs || logs.length < 3) return { status: 'insufficient_data', alert: false, message: 'Log at least 3 moods to see your AI analysis.' }
-
-  const recent = logs.slice(0, 7)
-  const moodValues = { terrible: 1, sad: 2, neutral: 3, good: 4, great: 5 }
-  const scores = recent.map(l => moodValues[l.mood] || 3)
-  const avg = scores.reduce((a, b) => a + b, 0) / scores.length
-  const trend = scores[0] - scores[scores.length - 1]
-
-  let status = 'normal'
-  let alert = false
-  let message = ''
-
-  if (avg < 2) {
-    status = 'critical'; alert = true
-    message = "You've been feeling low for a while. Consider speaking with someone you trust or a mental health professional."
-  } else if (avg < 2.5 && trend < -1) {
-    status = 'concerning'; alert = true
-    message = "Your mood has been declining. Remember to practice self-care and reach out for support."
-  } else if (avg >= 3.5) {
-    status = 'positive'
-    message = "You've been maintaining a positive mood. Keep up the great work!"
-  } else {
-    message = "Your mood is in a normal range. Keep tracking to see trends."
+  if (!logs || logs.length < 2) {
+    return {
+      status: 'insufficient_data',
+      message: 'Log at least 2 moods to see your trend analysis.',
+      avg: null,
+      alert: false,
+    }
   }
 
-  return { status, alert, message, avg: Math.round(avg * 10) / 10, trend }
+  const moodValues = { terrible: 1, sad: 2, neutral: 3, good: 4, great: 5 }
+  const recent = logs.slice(0, 7)
+  const scores = recent.map(l => moodValues[l.mood] || 3)
+  const avg = parseFloat((scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1))
+
+  if (avg >= 4.0) return {
+    status: 'positive', avg,
+    message: `You've been feeling great lately! Keep nurturing these positive moments. 🌟`,
+    alert: false,
+  }
+  if (avg >= 3.0) return {
+    status: 'normal', avg,
+    message: `Your mood has been balanced overall. Small self-care steps can help maintain this. 💙`,
+    alert: false,
+  }
+  if (avg >= 2.0) return {
+    status: 'concerning', avg,
+    message: `You've been going through a tough stretch. Consider reaching out to someone you trust. 💛`,
+    alert: false,
+  }
+  return {
+    status: 'critical', avg,
+    message: `You've been struggling recently. You deserve support — please reach out to a helpline or trusted person. 💙`,
+    alert: true,
+  }
 }
