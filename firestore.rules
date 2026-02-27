@@ -2,21 +2,26 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Users can only read/write their own profile
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // Mood logs: users can only access their own
     match /moodLogs/{logId} {
       allow read, write: if request.auth != null && request.auth.uid == resource.data.uid;
       allow create: if request.auth != null && request.auth.uid == request.resource.data.uid;
     }
 
-    // Chat history: users can only access their own
     match /chatHistory/{messageId} {
       allow read, write: if request.auth != null && request.auth.uid == resource.data.uid;
       allow create: if request.auth != null && request.auth.uid == request.resource.data.uid;
+    }
+
+    // Community posts - authenticated users can read all, write their own
+    match /communityPosts/{postId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.uid;
+      allow update: if request.auth != null; // for likes/replies
     }
   }
 }

@@ -7,6 +7,9 @@ import DashboardPage from '../pages/DashboardPage'
 import MoodTrackingPage from '../pages/MoodTrackingPage'
 import SelfHelpPage from '../pages/SelfHelpPage'
 import ChatPage from '../pages/ChatPage'
+import ProfilePage from '../pages/ProfilePage'
+import CommunityPage from '../pages/CommunityPage'
+import AdminDashboard from '../pages/AdminDashboard'
 
 const Protected = ({ children }) => {
   const { user } = useAuth()
@@ -22,6 +25,9 @@ export default function AppRouter() {
       <Route path="/mood" element={<Protected><MoodTrackingPage /></Protected>} />
       <Route path="/selfhelp" element={<SelfHelpPage />} />
       <Route path="/chat" element={<ChatPage />} />
+      <Route path="/profile" element={<Protected><ProfilePage /></Protected>} />
+      <Route path="/community" element={<CommunityPage />} />
+      <Route path="/admin" element={<Protected><AdminDashboard /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

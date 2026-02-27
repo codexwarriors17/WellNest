@@ -33,6 +33,7 @@ export default function Navbar() {
         { path: '/mood', label: t('moodTracker') },
         { path: '/selfhelp', label: t('selfHelp') },
         { path: '/chat', label: t('chatWithUs') },
+        { path: '/community', label: '👥 Community' },
       ]
     : [{ path: '/', label: t('home') }]
 
@@ -100,9 +101,9 @@ export default function Navbar() {
             {user ? (
               <div className="flex items-center gap-2">
                 <div className="hidden sm:flex items-center gap-2">
-                  <div className="w-7 h-7 bg-sky-100 rounded-full flex items-center justify-center text-sky-600 font-semibold text-sm">
+                  <Link to="/profile" className="w-7 h-7 bg-sky-100 rounded-full flex items-center justify-center text-sky-600 font-semibold text-sm hover:bg-sky-200 transition-colors">
                     {(profile?.displayName || user.email)?.[0]?.toUpperCase()}
-                  </div>
+                  </Link>
                   <span className="text-sm text-slate-600 hidden lg:block">{profile?.displayName?.split(' ')[0]}</span>
                 </div>
                 <button onClick={handleLogout} className="btn-ghost text-sm py-1.5 px-3 hidden sm:block">

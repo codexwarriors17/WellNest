@@ -181,10 +181,57 @@ export default function DashboardPage() {
             <QuickAction emoji="💬" title="Chat Support" desc="Talk to our AI companion" to="/chat" color="bg-sky-50" />
             <QuickAction emoji="🧘" title="Breathe" desc="Guided relaxation" to="/selfhelp" color="bg-sage-50" />
             <QuickAction emoji="📝" title="Journal" desc="Write your thoughts" to="/selfhelp?tab=journal" color="bg-amber-50" />
-            <QuickAction emoji="🎵" title="Meditate" desc="Calm your mind" to="/selfhelp?tab=meditate" color="bg-violet-50" />
+            <QuickAction emoji="🤸" title="Yoga" desc="Stretch & relax" to="/selfhelp?tab=yoga" color="bg-violet-50" />
+            <QuickAction emoji="💬" title="Affirmations" desc="Positive self-talk" to="/selfhelp?tab=affirmations" color="bg-rose-50" />
+            <QuickAction emoji="👥" title="Community" desc="Anonymous peer support" to="/community" color="bg-emerald-50" />
+            <QuickAction emoji="👤" title="My Profile" desc="Badges & settings" to="/profile" color="bg-indigo-50" />
+            <QuickAction emoji="🎵" title="Meditate" desc="Calm your mind" to="/selfhelp?tab=meditate" color="bg-cyan-50" />
+          </div>
+        </div>
+
+        {/* Export buttons */}
+        <div className="card">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h2 className="font-display text-lg text-slate-800">Export Your Data</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Download your mood history for personal records</p>
+            </div>
+            <div className="flex gap-2">
+              <ExportButton uid={user?.uid} profile={profile} />
+            </div>
           </div>
         </div>
       </div>
     </div>
+  )
+}
+
+// Export component
+function ExportButton({ uid, profile }) {
+  const [loading, setLoading] = useState(false)
+
+  const handleExport = async (type) => {
+    if (!uid) return
+    setLoading(type)
+    try {
+      const { exportMoodCSV, exportMoodPDF } = await import('../services/exportService')
+      const name = profile?.displayName || 'User'
+      if (type === 'csv') await exportMoodCSV(uid, name)
+      else await exportMoodPDF(uid, name, profile?.streak || 0, profile?.totalLogs || 0)
+    } catch (e) { console.error(e) }
+    setLoading(false)
+  }
+
+  return (
+    <>
+      <button onClick={() => handleExport('csv')} disabled={!!loading}
+        className="btn-secondary text-sm py-2 px-4">
+        {loading === 'csv' ? '...' : '📊 CSV'}
+      </button>
+      <button onClick={() => handleExport('pdf')} disabled={!!loading}
+        className="btn-primary text-sm py-2 px-4">
+        {loading === 'pdf' ? '...' : '📄 PDF Report'}
+      </button>
+    </>
   )
 }
