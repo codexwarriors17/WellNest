@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 // src/context/AuthContext.jsx
 import { createContext, useContext, useEffect, useState } from 'react'
 import { onAuthStateChanged } from 'firebase/auth'
@@ -51,3 +52,18 @@ export const useAuth = () => {
   if (!ctx) throw new Error('useAuth must be used inside AuthProvider')
   return ctx
 }
+=======
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "../firebase/firebase";
+
+const createUserDoc = async (user) => {
+  await setDoc(doc(db, "users", user.uid), {
+    name: user.displayName || "",
+    email: user.email || "",
+    photoURL: user.photoURL || "",
+    language: "en",
+    createdAt: serverTimestamp(),
+    lastLoginAt: serverTimestamp()
+  }, { merge: true });
+};
+>>>>>>> Stashed changes
