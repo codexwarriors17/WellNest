@@ -1,101 +1,80 @@
-# 🌿 WellNest — Mental Health Support App
+# 🌿 WellNest — Mental Health Support PWA
 
-A compassionate mental health companion for India. Built with React, Firebase, and love.
+A hackathon-ready mental wellness app built for India. Free, multilingual, always available.
 
-![WellNest](https://img.shields.io/badge/WellNest-Mental%20Health%20App-0ea5e9)
-
-## Features
-
-- 💬 **AI Chat Support** — Empathetic first-level support in multiple languages
-- 📊 **Mood Tracker** — Log daily emotions with trend analysis
-- 🧘 **Self-Help Tools** — Breathing exercises, journaling, and meditation
-- 🔔 **Push Notifications** — Daily reminders via Firebase Cloud Messaging
-- 🌍 **Multilingual** — English, Hindi (हिंदी), Marathi (मराठी), Tamil (தமிழ்)
-- ⚡ **PWA** — Works offline as a Progressive Web App
-- 🤖 **AI Mood Analysis** — Early intervention alerts from mood trends
-
-## Tech Stack
-
-| Category | Technology |
-|----------|-----------|
-| Frontend | React 18 + Vite |
-| Styling | Tailwind CSS |
-| Backend | Firebase (Auth, Firestore, Functions, FCM) |
-| Charts | Recharts |
-| i18n | react-i18next |
-| PWA | vite-plugin-pwa |
-
-## Setup
-
-### 1. Clone and Install
+## 🚀 Quick Start
 
 ```bash
-git clone https://github.com/your-username/wellnest
-cd wellnest
 npm install
+cp .env.example .env   # credentials already pre-filled for wellnest-7803a
+npm run dev            # → http://localhost:5173
 ```
 
-### 2. Firebase Setup
+## 🔔 FCM Setup (Push Notifications)
 
-1. Go to [Firebase Console](https://console.firebase.google.com)
-2. Create a new project
-3. Enable **Authentication** (Email/Password + Google)
-4. Create a **Firestore** database
-5. Enable **Cloud Messaging** and get your VAPID key
-6. Deploy Firestore rules: `firebase deploy --only firestore:rules`
+1. Go to [Firebase Console](https://console.firebase.google.com) → wellnest-7803a
+2. **Project Settings → Cloud Messaging → Web Push certificates**
+3. Click **Generate key pair** → copy the key
+4. Add to `.env`:
+   ```
+   VITE_FIREBASE_VAPID_KEY=your_key_here
+   ```
 
-### 3. Environment Variables
+## 🔥 Firebase Services to Enable
+
+In Firebase Console:
+- **Authentication** → Sign-in methods → Enable: Email/Password, Google, Anonymous
+- **Firestore Database** → Create database (production mode)
+- **Cloud Messaging** → Enabled automatically when you generate VAPID key
+
+## 📦 Deploy
 
 ```bash
-cp .env.example .env.local
-# Fill in your Firebase credentials
+npm install -g firebase-tools
+firebase login
+firebase deploy --only firestore:rules    # deploy security rules
+npm run build                              # build + inject SW env vars
+firebase deploy --only hosting            # deploy frontend
+firebase deploy --only functions          # deploy cloud functions
 ```
 
-### 4. Run Development Server
-
-```bash
-npm run dev
-```
-
-### 5. Deploy Firebase Functions
-
-```bash
-cd functions
-npm install
-cd ..
-firebase deploy --only functions
-```
-
-### 6. Build & Deploy to Firebase Hosting
-
-```bash
-npm run build
-firebase deploy --only hosting
-```
-
-## Project Structure
+## 🏗️ Project Structure
 
 ```
 src/
-├── components/      # Reusable UI components
-├── context/         # React Context (Auth)
-├── firebase/        # Firebase config & functions
-├── hooks/           # Custom hooks
-├── pages/           # Route pages
-├── routes/          # Router setup
-├── services/        # Business logic
-├── styles/          # Global CSS
-└── utils/           # Helpers (i18n, dates)
-functions/           # Firebase Cloud Functions
+├── components/         Reusable UI (Navbar, MoodTracker, Chatbot, Badges)
+├── context/            AuthContext — global auth state
+├── firebase/           firebaseConfig, firebaseFunctions, firebaseMessaging
+├── hooks/              useFCM — push notification hook
+├── pages/              All route pages
+├── routes/             AppRouter with protected routes
+├── services/           moodService, chatService, exportService
+├── styles/             global.css (Tailwind + custom classes)
+└── utils/              dateUtils, i18n
+
+public/
+└── firebase-messaging-sw.js   ← FCM service worker (background push)
+
+functions/
+└── index.js            Cloud Functions: mood alerts + daily reminders
 ```
 
-## Crisis Resources
+## 🌐 Routes
 
-If you or someone you know is in crisis:
-- **iCall**: 9152987821 (Mon-Sat 8am-10pm)
+| Path | Access | Description |
+|------|--------|-------------|
+| `/` | Public | Landing page |
+| `/login` | Guest only | Auth page |
+| `/chat` | Public | AI chat support |
+| `/selfhelp` | Public | Breathing, yoga, journal |
+| `/dashboard` | Protected | Mood chart, badges, quick actions |
+| `/mood` | Protected | Full mood tracker + history |
+| `/profile` | Protected | Profile, settings, notifications |
+| `/community` | Protected | Anonymous community posts |
+| `/admin` | Admin only | User stats dashboard |
+
+## 🆘 Crisis Helplines (India)
+
+- **iCall**: 9152987821 (Mon–Sat, 8am–10pm)
 - **Vandrevala Foundation**: 1860-2662-345 (24/7)
 - **Aasra**: 9820466627 (24/7)
-
----
-
-*WellNest is not a substitute for professional mental health care.*

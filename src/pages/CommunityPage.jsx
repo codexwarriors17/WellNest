@@ -3,20 +3,20 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import {
   collection, addDoc, getDocs, query, orderBy,
-  limit, serverTimestamp, updateDoc, doc, increment
+  limit, serverTimestamp, updateDoc, deleteDoc, doc, increment
 } from 'firebase/firestore'
 import { db } from '../firebase/firebaseConfig'
 import { formatRelative } from '../utils/dateUtils'
 import toast from 'react-hot-toast'
 
 const CATEGORIES = [
-  { id: 'all', label: '🌐 All', },
-  { id: 'anxiety', label: '😰 Anxiety' },
-  { id: 'depression', label: '💙 Depression' },
-  { id: 'stress', label: '😤 Stress' },
+  { id: 'all',           label: '🌐 All' },
+  { id: 'anxiety',       label: '😰 Anxiety' },
+  { id: 'depression',    label: '💙 Depression' },
+  { id: 'stress',        label: '😤 Stress' },
   { id: 'relationships', label: '❤️ Relationships' },
-  { id: 'wins', label: '🏆 Small Wins' },
-  { id: 'advice', label: '💡 Advice' },
+  { id: 'wins',          label: '🏆 Small Wins' },
+  { id: 'advice',        label: '💡 Advice' },
 ]
 
 const ANON_NAMES = [
@@ -31,10 +31,11 @@ const getAnonName = (uid) => {
   return ANON_NAMES[idx]
 }
 
-const PostCard = ({ post, onLike, onReply, currentUid }) => {
+const PostCard = ({ post, onLike, onReply, onDelete, currentUid }) => {
   const [showReplies, setShowReplies] = useState(false)
   const [replyText, setReplyText] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const handleReply = async () => {
     if (!replyText.trim() || !currentUid) return
@@ -47,8 +48,19 @@ const PostCard = ({ post, onLike, onReply, currentUid }) => {
     setSubmitting(false)
   }
 
+  const handleDelete = async () => {
+    if (!window.confirm('Delete this post?')) return
+    setDeleting(true)
+    try {
+      await onDelete(post.id)
+      toast.success('Post deleted')
+    } catch { toast.error('Could not delete post') }
+    setDeleting(false)
+  }
+
   const anonName = getAnonName(post.uid)
   const categoryObj = CATEGORIES.find(c => c.id === post.category)
+  const isOwner = currentUid && post.uid === currentUid
 
   return (
     <div className="card hover:shadow-hover transition-all duration-200">
@@ -59,13 +71,27 @@ const PostCard = ({ post, onLike, onReply, currentUid }) => {
             {anonName[0]}
           </div>
           <div>
-            <div className="text-sm font-semibold text-slate-700">{anonName}</div>
+            <div className="text-sm font-semibold text-slate-700">
+              {anonName} {isOwner && <span className="text-xs text-sky-500 font-normal">(you)</span>}
+            </div>
             <div className="text-xs text-slate-400">{formatRelative(post.timestamp)}</div>
           </div>
         </div>
-        {categoryObj && (
-          <span className="badge bg-sky-50 text-sky-700 text-xs">{categoryObj.label}</span>
-        )}
+        <div className="flex items-center gap-2">
+          {categoryObj && (
+            <span className="badge bg-sky-50 text-sky-700 text-xs">{categoryObj.label}</span>
+          )}
+          {isOwner && (
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="text-xs text-slate-300 hover:text-rose-400 transition-colors p-1"
+              title="Delete post"
+            >
+              🗑️
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Post content */}
@@ -89,7 +115,7 @@ const PostCard = ({ post, onLike, onReply, currentUid }) => {
         </button>
       </div>
 
-      {/* Replies section */}
+      {/* Replies */}
       {showReplies && (
         <div className="mt-4 border-t border-slate-100 pt-4 space-y-3 animate-slide-up">
           {(post.replies || []).map((reply, i) => (
@@ -116,13 +142,13 @@ const PostCard = ({ post, onLike, onReply, currentUid }) => {
               <button
                 onClick={handleReply}
                 disabled={!replyText.trim() || submitting}
-                className="w-9 h-9 rounded-xl bg-sky-500 hover:bg-sky-600 text-white flex items-center justify-center disabled:opacity-40 transition-all"
+                className="w-9 h-9 rounded-xl bg-sky-500 hover:bg-sky-600 text-white flex items-center justify-center disabled:opacity-40 transition-all flex-shrink-0"
               >
-                ↗
+                {submitting ? '...' : '→'}
               </button>
             </div>
           ) : (
-            <p className="text-xs text-slate-400 text-center">Sign in to reply</p>
+            <p className="text-xs text-slate-400 text-center py-2">Sign in to reply</p>
           )}
         </div>
       )}
@@ -132,13 +158,13 @@ const PostCard = ({ post, onLike, onReply, currentUid }) => {
 
 export default function CommunityPage() {
   const { user } = useAuth()
-  const [posts, setPosts] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [text, setText] = useState('')
-  const [category, setCategory] = useState('anxiety')
+  const [posts, setPosts]               = useState([])
+  const [loading, setLoading]           = useState(true)
+  const [text, setText]                 = useState('')
+  const [category, setCategory]         = useState('anxiety')
   const [activeCategory, setActiveCategory] = useState('all')
-  const [submitting, setSubmitting] = useState(false)
-  const [charCount, setCharCount] = useState(0)
+  const [submitting, setSubmitting]     = useState(false)
+  const [charCount, setCharCount]       = useState(0)
 
   const MAX_CHARS = 400
 
@@ -157,6 +183,7 @@ export default function CommunityPage() {
   const handlePost = async () => {
     if (!text.trim()) return
     if (!user) return toast.error('Please sign in to post')
+    if (user.isAnonymous) return toast.error('Guest users cannot post. Please create an account.')
     if (text.length > MAX_CHARS) return toast.error(`Max ${MAX_CHARS} characters`)
 
     setSubmitting(true)
@@ -201,6 +228,11 @@ export default function CommunityPage() {
     ))
   }
 
+  const handleDelete = async (postId) => {
+    await deleteDoc(doc(db, 'communityPosts', postId))
+    setPosts(prev => prev.filter(p => p.id !== postId))
+  }
+
   const filtered = activeCategory === 'all' ? posts : posts.filter(p => p.category === activeCategory)
 
   return (
@@ -226,7 +258,6 @@ export default function CommunityPage() {
         <div className="card">
           <h2 className="font-display text-lg text-slate-800 mb-4">Share your thoughts</h2>
 
-          {/* Category select */}
           <div className="flex gap-2 flex-wrap mb-3">
             {CATEGORIES.slice(1).map(cat => (
               <button
@@ -257,7 +288,7 @@ export default function CommunityPage() {
               <span className="text-xs text-slate-400">🔒 Posted anonymously</span>
               <button
                 onClick={handlePost}
-                disabled={!text.trim() || submitting || !user}
+                disabled={!text.trim() || submitting || !user || user?.isAnonymous}
                 className="btn-primary py-2 px-5 text-sm disabled:opacity-40"
               >
                 {submitting ? '...' : 'Post'}
@@ -265,6 +296,7 @@ export default function CommunityPage() {
             </div>
           </div>
           {!user && <p className="text-xs text-amber-600 mt-2">⚠️ Sign in to post and reply</p>}
+          {user?.isAnonymous && <p className="text-xs text-amber-600 mt-2">⚠️ Guest users can't post — <a href="/profile" className="underline font-semibold">upgrade your account</a> to participate</p>}
         </div>
 
         {/* Category filter */}
@@ -300,6 +332,7 @@ export default function CommunityPage() {
                 post={post}
                 onLike={handleLike}
                 onReply={handleReply}
+                onDelete={handleDelete}
                 currentUid={user?.uid}
               />
             ))}

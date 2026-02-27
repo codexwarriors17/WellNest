@@ -13,10 +13,10 @@ import {
   PieChart, Pie, Cell, BarChart, Bar, Legend
 } from 'recharts'
 
-// Add your admin UIDs here
+// Add your Firebase UIDs here — or set role: 'admin' in Firestore users collection
 const ADMIN_UIDS = [
-  // 'your-admin-firebase-uid-here',
-]
+  import.meta.env.VITE_ADMIN_UID || '',   // set VITE_ADMIN_UID in .env for quick setup
+].filter(Boolean)
 
 const StatCard = ({ icon, label, value, color }) => (
   <div className={`card border-l-4 ${color}`}>
