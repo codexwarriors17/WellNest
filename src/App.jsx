@@ -6,11 +6,15 @@ import Navbar from './components/Navbar'
 import AppRouter from './routes/AppRouter'
 import OnboardingFlow from './components/onboarding/OnboardingFlow'
 import { useState, useEffect } from 'react'
+import { useFCM } from './hooks/useFCM'
 
 function AppContent() {
   const { user, profile, loading } = useAuth()
   const location = useLocation()
   const [showOnboarding, setShowOnboarding] = useState(false)
+
+  // Start foreground FCM listener + auto-refresh token for signed-in users
+  useFCM(user?.uid || null)
 
   useEffect(() => {
     if (!loading && user && profile) {

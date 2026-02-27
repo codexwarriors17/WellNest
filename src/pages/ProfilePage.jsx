@@ -3,7 +3,7 @@ import { useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
 import { updateUserProfile } from '../firebase/firebaseFunctions'
-import { requestNotificationPermission } from '../firebase/firebaseMessaging'
+import { useFCM } from '../hooks/useFCM'
 import BadgeSystem from '../components/badges/BadgeSystem'
 import Button from '../components/Button'
 import toast from 'react-hot-toast'
@@ -29,6 +29,7 @@ export default function ProfilePage() {
   const { t, i18n } = useTranslation()
   const { user, profile, refreshProfile, isAnonymous } = useAuth()
   const [tab, setTab] = useState('profile') // 'profile' | 'badges' | 'settings'
+  const { permission: notifPermission, requestPermission } = useFCM(user?.uid || null)
   const [loading, setLoading] = useState(false)
   const [form, setForm] = useState({
     displayName: profile?.displayName || user?.displayName || '',
@@ -92,7 +93,11 @@ export default function ProfilePage() {
   }
 
   const handleEnableNotifications = async () => {
-    const token = await requestNotificationPermission(user?.uid)
+    if (notifPermission === 'denied') {
+      toast.error('Notifications blocked in browser. Please allow them in site settings.')
+      return
+    }
+    const token = await requestPermission()
     if (token) toast.success('Notifications enabled! 🔔')
     else toast.error('Could not enable notifications. Check browser settings.')
   }
@@ -300,7 +305,14 @@ export default function ProfilePage() {
                   <div className="font-medium text-slate-700 text-sm">Daily Mood Reminders</div>
                   <div className="text-xs text-slate-500">Get a gentle nudge every evening</div>
                 </div>
-                <Button variant="secondary" size="sm" onClick={handleEnableNotifications}>Enable</Button>
+                <Button
+                  variant={notifPermission === 'granted' ? 'ghost' : 'secondary'}
+                  size="sm"
+                  onClick={handleEnableNotifications}
+                  disabled={notifPermission === 'denied'}
+                >
+                  {notifPermission === 'granted' ? '✅ Enabled' : notifPermission === 'denied' ? '🚫 Blocked' : 'Enable'}
+                </Button>
               </div>
             </div>
 
