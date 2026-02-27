@@ -1,8 +1,9 @@
+
 // src/context/AuthContext.jsx
 import { createContext, useContext, useEffect, useState } from 'react'
 import { onAuthStateChanged } from 'firebase/auth'
 import { auth } from '../firebase/firebaseConfig'
-import { getUserProfile } from '../firebase/firebaseFunctions'
+import { createUserProfile, getUserProfile } from '../firebase/firebaseFunctions'
 
 const AuthContext = createContext(null)
 
@@ -14,26 +15,58 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser)
-      if (firebaseUser) {
-        const p = await getUserProfile(firebaseUser.uid)
-        setProfile(p)
-      } else {
+
+      try {
+        if (firebaseUser) {
+          // 1) Get profile
+          let p = await getUserProfile(firebaseUser.uid)
+
+          // 2) If missing, create it (important for new users / anonymous users)
+          if (!p) {
+            await createUserProfile(firebaseUser, {
+              language: 'en',
+              isAnonymous: !!firebaseUser.isAnonymous,
+            })
+            p = await getUserProfile(firebaseUser.uid)
+          }
+
+          setProfile(p)
+        } else {
+          setProfile(null)
+        }
+      } catch (err) {
+        console.error('AuthContext profile load error:', err)
+        // Don’t crash app, just keep profile null
         setProfile(null)
+      } finally {
+        setLoading(false)
       }
-      setLoading(false)
     })
-    return unsub
+
+    return () => unsub()
   }, [])
 
   const refreshProfile = async () => {
-    if (user) {
+    if (!user) return
+    try {
       const p = await getUserProfile(user.uid)
       setProfile(p)
+    } catch (err) {
+      console.error('refreshProfile error:', err)
     }
   }
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, refreshProfile }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        profile,
+        loading,
+        isAnonymous: !!user?.isAnonymous,
+        refreshProfile,
+      }}
+    >
+      {/* Prevent UI flicker */}
       {!loading && children}
     </AuthContext.Provider>
   )
