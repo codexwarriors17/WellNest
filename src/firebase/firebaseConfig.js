@@ -19,13 +19,16 @@ const firebaseConfig = {
   appId:             import.meta.env.VITE_FIREBASE_APP_ID              || '1:215863511352:web:323efeca132faa7ea919cd',
 }
 
-// ── Guard: prevent "Firebase app already exists" on hot-reload ───────────────
+// ── Guard: prevent "Firebase app already exists" on Vite HMR ─────────────────
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig)
 
 export const auth = getAuth(app)
 
-// ── Firestore with offline persistence ───────────────────────────────────────
-// initializeFirestore can only be called once; fall back to getFirestore on HMR
+// ── Firestore with full offline persistence ───────────────────────────────────
+// persistentLocalCache + persistentMultipleTabManager gives us:
+//   - Reads from IndexedDB when offline
+//   - Writes queue in IndexedDB and auto-sync when back online
+//   - Works across multiple browser tabs
 let _db
 try {
   _db = initializeFirestore(app, {
@@ -34,20 +37,19 @@ try {
     }),
   })
 } catch {
-  // Already initialized (Vite HMR fast-refresh scenario)
+  // initializeFirestore can only be called once — fall back on HMR re-execution
   _db = getFirestore(app)
 }
 export const db = _db
 
 export const functions = getFunctions(app)
 
-// ── VAPID key guard ───────────────────────────────────────────────────────────
+// ── VAPID key (required for FCM) ──────────────────────────────────────────────
 export const VAPID_KEY = import.meta.env.VITE_FIREBASE_VAPID_KEY
 if (!VAPID_KEY) {
   console.warn(
-    '[WellNest] ⚠️  VITE_FIREBASE_VAPID_KEY is not set. ' +
-    'FCM push notifications will not work. ' +
-    'Add it to your .env file. See README for instructions.'
+    '[WellNest] ⚠️ VITE_FIREBASE_VAPID_KEY is not set. ' +
+    'FCM push notifications will not work. Add it to your .env file.'
   )
 }
 
@@ -61,7 +63,7 @@ export const getMessagingInstance = async () => {
       _messagingInstance = getMessaging(app)
       return _messagingInstance
     }
-    console.info('[WellNest] FCM not supported in this browser (no SW support).')
+    console.info('[WellNest] FCM not supported in this browser.')
   } catch (e) {
     console.warn('[WellNest] Firebase Messaging init error:', e.message)
   }
