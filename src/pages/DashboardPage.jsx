@@ -48,16 +48,22 @@ export default function DashboardPage() {
   const [chartData, setChartData] = useState([])
   const [exportLoading, setExportLoading] = useState('')
   const [exportDays, setExportDays] = useState(30)
+  const [view, setView] = useState('recent') // recent | history | chart
 
   const fetchLogs = async () => {
     if (!user) return
     setLoading(true)
     try {
       const data = await getMoodLogs(user.uid, 30)
+      const data = await getUserMoodLogs(60) // ✅ fetch more for history
       setLogs(data)
       setAnalysis(analyzeMoodTrend(data))
       setChartData(prepareMoodChartData(data))
     } catch {}
+      setChartData(prepareMoodChartData(data, 14)) // ✅ last 14 points for chart
+    } catch (err) {
+      console.error(err)
+    }
     setLoading(false)
   }
 
@@ -156,6 +162,18 @@ export default function DashboardPage() {
                 </div>
               )}
             </div>
+            </div>
+
+            {analysis.alert && (
+              <div className="mt-3 flex gap-2 flex-wrap">
+                <a href="tel:9152987821" className="text-xs bg-white border rounded-xl px-3 py-1.5 font-medium hover:shadow-sm transition-all">
+                  📞 iCall: 9152987821
+                </a>
+                <a href="tel:18602662345" className="text-xs bg-white border rounded-xl px-3 py-1.5 font-medium hover:shadow-sm transition-all">
+                  📞 Vandrevala: 1860-2662-345
+                </a>
+              </div>
+            )}
           </div>
         )}
 
@@ -167,6 +185,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Chart */}
+          {/* Mood trend chart */}
           <div className="card">
             <div className="section-header">
               <h2 className="font-display text-lg text-slate-800">Mood Trend</h2>
@@ -174,6 +193,11 @@ export default function DashboardPage() {
                 <span className="badge bg-sky-50 text-sky-600">{logs.length} logs</span>
               )}
             </div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-display text-lg text-slate-800">{t('yourMoodTrend')}</h2>
+              <span className="text-xs text-slate-400">Last 14 logs</span>
+            </div>
+
             {chartData.length >= 2 ? (
               <ResponsiveContainer width="100%" height={190}>
                 <AreaChart data={chartData}>
@@ -185,6 +209,10 @@ export default function DashboardPage() {
                   </defs>
                   <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
                   <YAxis domain={[1,5]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={18} ticks={[1,2,3,4,5]} />
+              <ResponsiveContainer width="100%" height={210}>
+                <LineChart data={chartData}>
+                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                  <YAxis domain={[1, 5]} tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={20} />
                   <Tooltip content={<CustomTooltip />} />
                   <Area type="monotone" dataKey="value" stroke="#0ea5e9" strokeWidth={2.5}
                     fill="url(#moodGrad)" dot={{ fill: '#0ea5e9', strokeWidth: 0, r: 3.5 }}
@@ -206,12 +234,39 @@ export default function DashboardPage() {
             <h2 className="font-display text-lg text-slate-800">Recent Logs</h2>
             <Link to="/mood" className="text-xs text-sky-600 font-semibold hover:underline">View all →</Link>
           </div>
+        {/* Toggle */}
+        <div className="flex gap-1 bg-white rounded-2xl p-1 shadow-card w-fit">
+          {[
+            { id: 'recent', label: '📌 Recent' },
+            { id: 'history', label: '📋 History' },
+            { id: 'chart', label: '📊 Chart' },
+          ].map((v) => (
+            <button
+              key={v.id}
+              onClick={() => setView(v.id)}
+              className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
+                view === v.id ? 'bg-sky-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Mood section */}
+        <div className="card">
+          <h2 className="font-display text-lg text-slate-800 mb-4">
+            {view === 'recent' ? t('recentLogs') : view === 'history' ? 'Mood History' : 'Mood Chart (last 14)'}
+          </h2>
+
           {loading ? (
             <div className="space-y-2">
               {[...Array(3)].map((_, i) => <div key={i} className="h-12 shimmer rounded-xl" />)}
+            <div className="flex justify-center py-10">
+              <div className="w-6 h-6 border-2 border-sky-300 border-t-sky-600 rounded-full animate-spin" />
             </div>
           ) : logs.length === 0 ? (
-            <div className="text-center py-8">
+            <div className="text-center py-10">
               <div className="text-4xl mb-2">🌱</div>
               <p className="text-slate-400 text-sm">No logs yet. Log your first mood above!</p>
             </div>
@@ -228,6 +283,27 @@ export default function DashboardPage() {
                       {log.note && <p className="text-xs text-slate-400 truncate">{log.note}</p>}
                     </div>
                     <span className="text-xs text-slate-400 flex-shrink-0">{formatDate(log.timestamp)}</span>
+          ) : view === 'chart' ? (
+            <ResponsiveContainer width="100%" height={260}>
+              <LineChart data={chartData}>
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                <YAxis domain={[1, 5]} tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={20} />
+                <Tooltip content={<CustomTooltip />} />
+                <Line type="monotone" dataKey="value" stroke="#0ea5e9" strokeWidth={2.5} dot={{ r: 4 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="space-y-2 max-h-80 overflow-y-auto">
+              {(view === 'recent' ? logs.slice(0, 10) : logs).map((log) => (
+                <div
+                  key={log.id}
+                  className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 transition-colors"
+                  style={{ borderLeft: `3px solid ${getMoodColor(log.mood)}` }}
+                >
+                  <span className="text-xl">{getMoodEmoji(log.mood)}</span>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium text-slate-700 capitalize">{log.mood}</span>
+                    {log.note && <p className="text-xs text-slate-400 truncate">{log.note}</p>}
                   </div>
                 )
               })}

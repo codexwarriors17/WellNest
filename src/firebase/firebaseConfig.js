@@ -22,6 +22,7 @@ const firebaseConfig = {
 // ── Guard: prevent "Firebase app already exists" on Vite HMR ─────────────────
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig)
 
+// ✅ Auth
 export const auth = getAuth(app)
 
 // ── Firestore with full offline persistence ───────────────────────────────────
@@ -42,6 +43,7 @@ try {
 }
 export const db = _db
 
+// ✅ Cloud Functions
 export const functions = getFunctions(app)
 
 // ── VAPID key (required for FCM) ──────────────────────────────────────────────

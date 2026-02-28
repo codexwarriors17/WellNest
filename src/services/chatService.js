@@ -1,4 +1,28 @@
 // src/services/chatService.js
+// AI-powered empathetic chatbot responses + Firestore persistence
+
+import {
+  addDoc,
+  collection,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  where,
+} from "firebase/firestore"
+import { auth, db } from "../firebase/firebaseConfig"
+
+/**
+ * Firestore structure:
+ * chatMessages (collection)
+ *  - uid: string
+ *  - sender: "user" | "bot"
+ *  - text: string
+ *  - isCrisis: boolean
+ *  - createdAt: serverTimestamp
+ */
+
 // AI-powered empathetic chatbot using Claude API (claude-sonnet-4-6)
 // Falls back to local keyword responses if API is unavailable
 
@@ -97,6 +121,10 @@ const responses = {
     "That's so great! Keep nurturing those good feelings. 😊",
   ],
   crisis: [
+    "I'm really concerned about you and I care about your safety. 💙 Please reach out to a crisis helpline right now — they have trained professionals available 24/7:\n\n📞 iCall: 9152987821\n📞 Vandrevala Foundation: 1860-2662-345\n\nYou deserve support. Are you safe right now?",
+  ],
+  resources: [
+    "Here are some resources that might help:\n\n🆘 **iCall Helpline**: 9152987821 (Mon-Sat, 8am-10pm)\n🆘 **Vandrevala Foundation**: 1860-2662-345 (24/7)\n\nWould you like me to suggest some self-help exercises?",
     "I'm really concerned about you and I care about your safety. 💙 Please reach out to a crisis helpline right now — they have trained professionals available:\n\n📞 iCall: 9152987821\n📞 Vandrevala Foundation: 1860-2662-345 (24/7)\n\nYou deserve support. Are you safe right now?",
   ],
   default: [
@@ -108,6 +136,14 @@ const responses = {
 }
 
 const keywords = {
+  greetings: ["hi", "hello", "hey", "namaste", "good morning", "good evening", "hola"],
+  sad: ["sad", "depressed", "unhappy", "crying", "tears", "hopeless", "empty", "miserable", "down"],
+  anxious: ["anxious", "anxiety", "worried", "nervous", "panic", "fear", "scared", "overwhelmed", "stressed out"],
+  stressed: ["stress", "stressed", "pressure", "work", "exam", "deadline", "tired", "exhausted", "burned out", "burnout"],
+  lonely: ["lonely", "alone", "isolated", "no one", "nobody", "friendless"],
+  happy: ["happy", "great", "wonderful", "amazing", "good", "fine", "fantastic", "joy", "excited"],
+  crisis: ["suicide", "kill myself", "want to die", "end my life", "hurt myself", "self harm", "self-harm"],
+  resources: ["helpline", "therapist", "doctor", "help", "number", "resources", "support"],
   greetings: ['hi', 'hello', 'hey', 'namaste', 'good morning', 'good evening'],
   sad: ['sad', 'depressed', 'unhappy', 'crying', 'tears', 'hopeless', 'empty', 'miserable', 'down'],
   anxious: ['anxious', 'anxiety', 'worried', 'nervous', 'panic', 'fear', 'scared', 'overwhelmed'],
@@ -118,6 +154,8 @@ const keywords = {
 
 const rand = (arr) => arr[Math.floor(Math.random() * arr.length)]
 
+export const generateBotResponse = (userMessage) => {
+  const msg = (userMessage || "").toLowerCase().trim()
 export const generateBotResponseLocal = (userMessage) => {
   const msg = userMessage.toLowerCase().trim()
 
@@ -126,6 +164,7 @@ export const generateBotResponseLocal = (userMessage) => {
   }
 
   for (const [category, kws] of Object.entries(keywords)) {
+    if (category === "crisis") continue
     for (const kw of kws) {
       if (msg.includes(kw)) {
         return { text: rand(responses[category] || responses.default), isCrisis: false, source: 'local' }
@@ -140,8 +179,64 @@ export const generateBotResponseLocal = (userMessage) => {
 export const generateBotResponse = generateBotResponseLocal
 
 export const getInitialMessage = () => ({
-  id: Date.now(),
-  sender: 'bot',
+  id: "init",
+  sender: "bot",
   text: "Hi! 🌿 I'm your WellNest companion. I'm here to listen and support you without any judgment. How are you feeling today?",
-  timestamp: new Date(),
+  createdAt: new Date(),
+  isCrisis: false,
 })
+
+/* -----------------------------
+   Firestore helpers
+-------------------------------- */
+
+const requireUser = () => {
+  const user = auth.currentUser
+  if (!user) throw new Error("User not logged in")
+  return user
+}
+
+export const sendMessageToFirestore = async ({ text, sender = "user", isCrisis = false }) => {
+  const user = requireUser()
+  const clean = (text || "").trim()
+  if (!clean) return
+
+  await addDoc(collection(db, "chatMessages"), {
+    uid: user.uid,
+    sender, // "user" | "bot"
+    text: clean,
+    isCrisis,
+    createdAt: serverTimestamp(),
+  })
+}
+
+export const subscribeToUserChat = (callback, limitCount = 80) => {
+  const user = requireUser()
+
+  const q = query(
+    collection(db, "chatMessages"),
+    where("uid", "==", user.uid),
+    orderBy("createdAt", "asc"),
+    limit(limitCount)
+  )
+
+  return onSnapshot(q, (snap) => {
+    const msgs = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+    callback(msgs)
+  })
+}
+
+/**
+ * One-call function used by UI:
+ * - Saves user message
+ * - Generates bot response using your logic
+ * - Saves bot message
+ */
+export const sendUserMessageWithBotReply = async (userText) => {
+  await sendMessageToFirestore({ text: userText, sender: "user", isCrisis: false })
+
+  const bot = generateBotResponse(userText)
+  await sendMessageToFirestore({ text: bot.text, sender: "bot", isCrisis: bot.isCrisis })
+
+  return bot
+}
