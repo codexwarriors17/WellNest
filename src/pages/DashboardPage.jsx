@@ -1,383 +1,120 @@
 // src/pages/DashboardPage.jsx
-import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts'
+
 import { useAuth } from '../context/AuthContext'
 import { getMoodLogs, analyzeMoodTrend } from '../firebase/firebaseFunctions'
-import { prepareMoodChartData, getMoodEmoji, MOODS } from '../services/moodService'
-import { formatDate, getGreeting } from '../utils/dateUtils'
-import MoodTracker from '../components/MoodTracker'
-import { BadgeCard, computeBadges } from '../components/badges/BadgeSystem'
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts'
-import toast from 'react-hot-toast'
-
-const ALERT_STYLES = {
-  positive:         { bg: 'bg-emerald-50',  border: 'border-emerald-200', text: 'text-emerald-700', icon: '🌟' },
-  normal:           { bg: 'bg-sky-50',       border: 'border-sky-200',     text: 'text-sky-700',     icon: '💙' },
-  concerning:       { bg: 'bg-amber-50',     border: 'border-amber-200',   text: 'text-amber-700',   icon: '⚠️' },
-  critical:         { bg: 'bg-rose-50',      border: 'border-rose-200',    text: 'text-rose-700',    icon: '🆘' },
-  insufficient_data:{ bg: 'bg-slate-50',     border: 'border-slate-200',   text: 'text-slate-600',   icon: '🌱' },
-}
-
-const QuickCard = ({ emoji, title, desc, to, gradient }) => (
-  <Link to={to} className={`card-hover bg-gradient-to-br ${gradient} border-0 group`}>
-    <div className="text-2xl mb-2 group-hover:scale-110 transition-transform">{emoji}</div>
-    <div className="font-semibold text-slate-800 text-sm">{title}</div>
-    <div className="text-xs text-slate-500 mt-0.5 leading-relaxed">{desc}</div>
-  </Link>
-)
-
-const CustomTooltip = ({ active, payload }) => {
-  if (!active || !payload?.length) return null
-  const d = payload[0].payload
-  return (
-    <div className="bg-white border border-slate-100 rounded-2xl p-3 shadow-xl text-center">
-      <div className="text-2xl mb-1">{d.emoji}</div>
-      <div className="text-xs font-semibold text-slate-700 capitalize">{d.mood}</div>
-      <div className="text-xs text-slate-400">{d.date}</div>
-    </div>
-  )
-}
+import { prepareMoodChartData } from '../services/moodService'
 
 export default function DashboardPage() {
   const { t } = useTranslation()
-  const { user, profile } = useAuth()
+  const { user } = useAuth()
+
   const [logs, setLogs] = useState([])
-  const [loading, setLoading] = useState(true)
   const [analysis, setAnalysis] = useState(null)
   const [chartData, setChartData] = useState([])
-  const [exportLoading, setExportLoading] = useState('')
-  const [exportDays, setExportDays] = useState(30)
-  const [view, setView] = useState('recent') // recent | history | chart
+  const [loading, setLoading] = useState(true)
 
-  const fetchLogs = async () => {
-    if (!user) return
+  const fetchDashboardMood = async () => {
+    if (!user?.uid) return
     setLoading(true)
+
     try {
-      const data = await getMoodLogs(user.uid, 30)
-      const data = await getUserMoodLogs(60) // ✅ fetch more for history
-      setLogs(data)
-      setAnalysis(analyzeMoodTrend(data))
-      setChartData(prepareMoodChartData(data))
-    } catch {}
-      setChartData(prepareMoodChartData(data, 14)) // ✅ last 14 points for chart
+      // ✅ fetch more logs for better analysis/history
+      const data = await getMoodLogs(user.uid, 60)
+      const safe = Array.isArray(data) ? data : []
+
+      setLogs(safe)
+
+      const a = analyzeMoodTrend(safe)
+      setAnalysis(a)
+
+      // ✅ last 14 points for chart
+      setChartData(prepareMoodChartData(safe, 14))
     } catch (err) {
       console.error(err)
+      setLogs([])
+      setAnalysis(null)
+      setChartData([])
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
-  useEffect(() => { fetchLogs() }, [user])
+  useEffect(() => {
+    fetchDashboardMood()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid])
 
-  const handleExport = async (type) => {
-    if (!user) return
-    setExportLoading(type)
-    try {
-      const { exportMoodCSV, exportMoodPDF, sharePDFWithDoctor } = await import('../services/exportService')
-      const name = profile?.displayName || 'User'
-      if (type === 'csv') {
-        const ok = await exportMoodCSV(user.uid, name)
-        ok ? toast.success('CSV downloaded! 📊') : toast.error('No data to export.')
-      } else if (type === 'pdf') {
-        const ok = await exportMoodPDF(user.uid, name, profile?.streak || 0, profile?.totalLogs || 0, exportDays)
-        ok ? toast.success('PDF report opened! 📄') : toast.error('No data to export.')
-      } else if (type === 'doctor') {
-        const ok = await sharePDFWithDoctor(user.uid, name, profile?.streak || 0, profile?.totalLogs || 0, exportDays)
-        ok ? toast.success('Email drafted! 📧') : toast.error('No data to share.')
-      }
-    } catch { toast.error('Export failed. Try again.') }
-    setExportLoading('')
-  }
-
-  const name = profile?.displayName?.split(' ')[0] || user?.displayName?.split(' ')[0] || 'Friend'
-  const streak = profile?.streak || 0
-  const totalLogs = profile?.totalLogs || logs.length
-
-  // Compute badges
-  const badgeStats = {
-    totalLogs, streak,
-    positiveDays: logs.filter(l => ['great','good'].includes(l.mood)).length,
-    usedBreathing: !!localStorage.getItem('wellnest_used_breathing'),
-    usedJournal: !!(JSON.parse(localStorage.getItem('wellnest_journal') || '[]').length),
-    loggedAfterBadDay: logs.some((l, i) => i > 0 && logs[i-1]?.mood === 'terrible' && l.mood !== 'terrible'),
-  }
-  const earnedBadges = computeBadges(badgeStats).filter(b => b.earned).slice(0, 3)
-
-  const alert = analysis ? ALERT_STYLES[analysis.status] || ALERT_STYLES.normal : null
+  const avg7 = useMemo(() => analysis?.avg ?? null, [analysis])
 
   return (
-    <div className="page-container">
-      <div className="content-wrapper">
+    <div className="min-h-screen bg-slate-50 pt-20 pb-10">
+      <div className="max-w-5xl mx-auto px-4 space-y-6">
+        <div>
+          <h1 className="font-display text-3xl text-slate-900">
+            {t('dashboard') || 'Dashboard'}
+          </h1>
+          <p className="text-slate-500 text-sm mt-1">
+            {t('dashboardSubtitle') || 'Your weekly mood overview'}
+          </p>
+        </div>
 
-        {/* ── HEADER ── */}
-        <div className="flex items-start justify-between gap-4 flex-wrap animate-fade-up">
-          <div>
-            <p className="text-sm text-slate-400 font-medium">{getGreeting()},</p>
-            <h1 className="font-display text-3xl text-slate-900">{name} 👋</h1>
-            <p className="text-sm text-slate-500 mt-1">
-              {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
-            </p>
+        {/* Summary */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+            <div className="text-xs text-slate-500">{t('totalLogs') || 'Total mood logs'}</div>
+            <div className="font-display text-3xl text-slate-800 mt-1">{logs.length}</div>
           </div>
-          <div className="flex gap-3">
-            {[
-              { value: streak, label: 'Day Streak', icon: streak >= 7 ? '🔥' : '✨', color: 'from-orange-50 to-amber-50 border-orange-100' },
-              { value: totalLogs, label: 'Total Logs', icon: '📊', color: 'from-sky-50 to-cyan-50 border-sky-100' },
-            ].map((s, i) => (
-              <div key={i} className={`bg-gradient-to-br ${s.color} border rounded-2xl px-4 py-3 text-center min-w-[80px]`}>
-                <div className="text-lg">{s.icon}</div>
-                <div className="stat-number text-xl">{s.value}</div>
-                <div className="text-[10px] text-slate-500 font-medium mt-0.5">{s.label}</div>
-              </div>
-            ))}
+
+          <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+            <div className="text-xs text-slate-500">{t('trend') || 'Trend'}</div>
+            <div className="font-semibold text-slate-800 mt-2">
+              {analysis?.status ? analysis.status.toUpperCase() : '—'}
+            </div>
+            <div className="text-xs text-slate-500 mt-1">{analysis?.message || '—'}</div>
+          </div>
+
+          <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+            <div className="text-xs text-slate-500">{t('avg7') || '7-day average'}</div>
+            <div className="font-display text-3xl text-slate-800 mt-1">
+              {avg7 !== null ? `${avg7}/5` : '—'}
+            </div>
           </div>
         </div>
 
-        {/* ── AI ANALYSIS BANNER ── */}
-        {analysis && alert && (
-          <div className={`${alert.bg} border ${alert.border} rounded-2xl p-4 animate-fade-up delay-100`}>
-            <div className="flex items-start gap-3">
-              <span className="text-2xl">{alert.icon}</span>
-              <div className="flex-1">
-                <p className={`text-sm font-semibold ${alert.text}`}>AI Mood Analysis</p>
-                <p className={`text-sm mt-0.5 ${alert.text} opacity-80`}>{analysis.message}</p>
-                {analysis.avg && (
-                  <div className="mt-2">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs text-slate-500">7-day avg: {analysis.avg}/5</span>
-                    </div>
-                    <div className="progress-bar w-48">
-                      <div className="progress-fill" style={{ width: `${(analysis.avg / 5) * 100}%` }} />
-                    </div>
-                  </div>
-                )}
-              </div>
-              {analysis.alert && (
-                <div className="flex flex-col gap-1.5 flex-shrink-0">
-                  <a href="tel:9152987821" className="text-xs bg-white border border-rose-200 text-rose-600 rounded-xl px-3 py-1.5 font-semibold hover:bg-rose-50 transition-colors text-center">
-                    📞 iCall
-                  </a>
-                  <a href="tel:18602662345" className="text-xs bg-white border border-rose-200 text-rose-600 rounded-xl px-3 py-1.5 font-semibold hover:bg-rose-50 transition-colors text-center">
-                    📞 Vandrevala
-                  </a>
-                </div>
-              )}
-            </div>
-            </div>
-
-            {analysis.alert && (
-              <div className="mt-3 flex gap-2 flex-wrap">
-                <a href="tel:9152987821" className="text-xs bg-white border rounded-xl px-3 py-1.5 font-medium hover:shadow-sm transition-all">
-                  📞 iCall: 9152987821
-                </a>
-                <a href="tel:18602662345" className="text-xs bg-white border rounded-xl px-3 py-1.5 font-medium hover:shadow-sm transition-all">
-                  📞 Vandrevala: 1860-2662-345
-                </a>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── MOOD + CHART ── */}
-        <div className="grid md:grid-cols-2 gap-5 animate-fade-up delay-200">
-          {/* Log mood */}
-          <div className="card">
-            <MoodTracker onMoodSaved={fetchLogs} />
+        {/* Chart */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-display text-lg text-slate-800">
+              {t('moodTrend') || 'Mood Trend (last 14)'}
+            </h2>
+            {loading && <span className="text-xs text-slate-400">Loading…</span>}
           </div>
 
-          {/* Chart */}
-          {/* Mood trend chart */}
-          <div className="card">
-            <div className="section-header">
-              <h2 className="font-display text-lg text-slate-800">Mood Trend</h2>
-              {logs.length > 0 && (
-                <span className="badge bg-sky-50 text-sky-600">{logs.length} logs</span>
-              )}
-            </div>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-display text-lg text-slate-800">{t('yourMoodTrend')}</h2>
-              <span className="text-xs text-slate-400">Last 14 logs</span>
-            </div>
-
-            {chartData.length >= 2 ? (
-              <ResponsiveContainer width="100%" height={190}>
-                <AreaChart data={chartData}>
-                  <defs>
-                    <linearGradient id="moodGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.15}/>
-                      <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                  <YAxis domain={[1,5]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={18} ticks={[1,2,3,4,5]} />
-              <ResponsiveContainer width="100%" height={210}>
-                <LineChart data={chartData}>
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                  <YAxis domain={[1, 5]} tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={20} />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Area type="monotone" dataKey="value" stroke="#0ea5e9" strokeWidth={2.5}
-                    fill="url(#moodGrad)" dot={{ fill: '#0ea5e9', strokeWidth: 0, r: 3.5 }}
-                    activeDot={{ r: 6, fill: '#0284c7', strokeWidth: 2, stroke: '#fff' }} />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-48 flex flex-col items-center justify-center text-center">
-                <div className="text-5xl mb-3 opacity-40">📈</div>
-                <p className="text-sm text-slate-400">Log 2+ moods to see your trend</p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ── RECENT LOGS ── */}
-        <div className="card animate-fade-up delay-300">
-          <div className="section-header">
-            <h2 className="font-display text-lg text-slate-800">Recent Logs</h2>
-            <Link to="/mood" className="text-xs text-sky-600 font-semibold hover:underline">View all →</Link>
-          </div>
-        {/* Toggle */}
-        <div className="flex gap-1 bg-white rounded-2xl p-1 shadow-card w-fit">
-          {[
-            { id: 'recent', label: '📌 Recent' },
-            { id: 'history', label: '📋 History' },
-            { id: 'chart', label: '📊 Chart' },
-          ].map((v) => (
-            <button
-              key={v.id}
-              onClick={() => setView(v.id)}
-              className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
-                view === v.id ? 'bg-sky-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              {v.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Mood section */}
-        <div className="card">
-          <h2 className="font-display text-lg text-slate-800 mb-4">
-            {view === 'recent' ? t('recentLogs') : view === 'history' ? 'Mood History' : 'Mood Chart (last 14)'}
-          </h2>
-
-          {loading ? (
-            <div className="space-y-2">
-              {[...Array(3)].map((_, i) => <div key={i} className="h-12 shimmer rounded-xl" />)}
-            <div className="flex justify-center py-10">
-              <div className="w-6 h-6 border-2 border-sky-300 border-t-sky-600 rounded-full animate-spin" />
-            </div>
-          ) : logs.length === 0 ? (
-            <div className="text-center py-10">
-              <div className="text-4xl mb-2">🌱</div>
-              <p className="text-slate-400 text-sm">No logs yet. Log your first mood above!</p>
+          {!loading && chartData.length < 2 ? (
+            <div className="h-44 flex flex-col items-center justify-center text-center">
+              <div className="text-4xl mb-2">📈</div>
+              <p className="text-slate-500 text-sm">Log at least 2 moods to see a trend</p>
             </div>
           ) : (
-            <div className="space-y-2 max-h-52 overflow-y-auto">
-              {logs.slice(0, 8).map((log, i) => {
-                const mood = MOODS.find(m => m.id === log.mood)
-                return (
-                  <div key={log.id} className={`flex items-center gap-3 p-3 rounded-2xl hover:bg-slate-50 transition-colors animate-slide-in delay-${i * 50}`}
-                    style={{ borderLeft: `3px solid ${mood?.color || '#0ea5e9'}` }}>
-                    <span className="text-xl">{getMoodEmoji(log.mood)}</span>
-                    <div className="flex-1 min-w-0">
-                      <span className="text-sm font-semibold text-slate-700 capitalize">{log.mood}</span>
-                      {log.note && <p className="text-xs text-slate-400 truncate">{log.note}</p>}
-                    </div>
-                    <span className="text-xs text-slate-400 flex-shrink-0">{formatDate(log.timestamp)}</span>
-          ) : view === 'chart' ? (
-            <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={chartData}>
-                <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                <YAxis domain={[1, 5]} tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={20} />
-                <Tooltip content={<CustomTooltip />} />
-                <Line type="monotone" dataKey="value" stroke="#0ea5e9" strokeWidth={2.5} dot={{ r: 4 }} />
-              </LineChart>
+            <ResponsiveContainer width="100%" height={220}>
+              <AreaChart data={chartData}>
+                <defs>
+                  <linearGradient id="dashMood" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.18} />
+                    <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                <YAxis domain={[1, 5]} ticks={[1, 2, 3, 4, 5]} axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} width={18} />
+                <Tooltip />
+                <Area type="monotone" dataKey="value" stroke="#0ea5e9" strokeWidth={2.5} fill="url(#dashMood)" />
+              </AreaChart>
             </ResponsiveContainer>
-          ) : (
-            <div className="space-y-2 max-h-80 overflow-y-auto">
-              {(view === 'recent' ? logs.slice(0, 10) : logs).map((log) => (
-                <div
-                  key={log.id}
-                  className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 transition-colors"
-                  style={{ borderLeft: `3px solid ${getMoodColor(log.mood)}` }}
-                >
-                  <span className="text-xl">{getMoodEmoji(log.mood)}</span>
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm font-medium text-slate-700 capitalize">{log.mood}</span>
-                    {log.note && <p className="text-xs text-slate-400 truncate">{log.note}</p>}
-                  </div>
-                )
-              })}
-            </div>
           )}
         </div>
-
-        {/* ── QUICK ACTIONS ── */}
-        <div className="animate-fade-up delay-300">
-          <h2 className="font-display text-lg text-slate-800 mb-3">Quick Actions</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <QuickCard emoji="💬" title="Chat Support" desc="Talk to AI companion" to="/chat" gradient="from-sky-50 to-cyan-50" />
-            <QuickCard emoji="🌬️" title="Breathe" desc="Quick anxiety relief" to="/selfhelp" gradient="from-teal-50 to-emerald-50" />
-            <QuickCard emoji="📝" title="Journal" desc="Write your thoughts" to="/selfhelp?tab=journal" gradient="from-amber-50 to-yellow-50" />
-            <QuickCard emoji="🤸" title="Yoga" desc="Stretch & relax" to="/selfhelp?tab=yoga" gradient="from-violet-50 to-purple-50" />
-            <QuickCard emoji="💬" title="Affirmations" desc="Positive self-talk" to="/selfhelp?tab=affirmations" gradient="from-rose-50 to-pink-50" />
-            <QuickCard emoji="👥" title="Community" desc="You're not alone" to="/community" gradient="from-indigo-50 to-blue-50" />
-            <QuickCard emoji="🏆" title="My Badges" desc="View achievements" to="/profile" gradient="from-orange-50 to-amber-50" />
-            <QuickCard emoji="🧘" title="Meditate" desc="Calm your mind" to="/selfhelp?tab=meditate" gradient="from-cyan-50 to-sky-50" />
-          </div>
-        </div>
-
-        {/* ── BADGES PREVIEW ── */}
-        {earnedBadges.length > 0 && (
-          <div className="card animate-fade-up delay-400">
-            <div className="section-header">
-              <h2 className="font-display text-lg text-slate-800">Recent Badges</h2>
-              <Link to="/profile?tab=badges" className="text-xs text-sky-600 font-semibold hover:underline">View all →</Link>
-            </div>
-            <div className="flex gap-3">
-              {earnedBadges.map(badge => <BadgeCard key={badge.id} badge={badge} size="sm" />)}
-              <div className="flex-1 border-2 border-dashed border-slate-100 rounded-2xl flex flex-col items-center justify-center p-3 text-center min-h-[80px]">
-                <p className="text-xs text-slate-400">Keep going for more!</p>
-                <p className="text-lg mt-1">🎯</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── EXPORT ── */}
-        <div className="card animate-fade-up delay-400 space-y-4">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div>
-              <h2 className="font-display text-lg text-slate-800">Export Your Data</h2>
-              <p className="text-xs text-slate-500 mt-0.5">Download your mood history as CSV, PDF, or share with your doctor</p>
-            </div>
-            {/* Period toggle */}
-            <div className="flex gap-1 bg-slate-100 rounded-xl p-1">
-              {[7, 30].map(d => (
-                <button key={d} onClick={() => setExportDays(d)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                    exportDays === d ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'
-                  }`}>
-                  {d}-day
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <button onClick={() => handleExport('csv')} disabled={!!exportLoading}
-              className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-2xl bg-emerald-50 border border-emerald-100 text-emerald-700 font-semibold text-xs hover:bg-emerald-100 transition-colors disabled:opacity-50">
-              {exportLoading === 'csv' ? '⏳' : '📊'} CSV Data
-            </button>
-            <button onClick={() => handleExport('pdf')} disabled={!!exportLoading}
-              className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-2xl bg-sky-50 border border-sky-100 text-sky-700 font-semibold text-xs hover:bg-sky-100 transition-colors disabled:opacity-50">
-              {exportLoading === 'pdf' ? '⏳' : '📄'} PDF Report
-            </button>
-            <button onClick={() => handleExport('doctor')} disabled={!!exportLoading}
-              className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-2xl bg-violet-50 border border-violet-100 text-violet-700 font-semibold text-xs hover:bg-violet-100 transition-colors disabled:opacity-50">
-              {exportLoading === 'doctor' ? '⏳' : '🩺'} Share with Doctor
-            </button>
-          </div>
-        </div>
-
       </div>
     </div>
   )
