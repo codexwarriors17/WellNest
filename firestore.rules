@@ -2,30 +2,44 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Users can read/write their own profile (works for anon + registered)
+    // ── Users ──────────────────────────────────────────────────────────────
+    // Any signed-in user can read any profile (for community features).
+    // Only the owner can write their own profile.
     match /users/{userId} {
       allow read:   if request.auth != null;
-      allow write:  if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow update: if request.auth != null && request.auth.uid == userId;
+      allow delete: if false; // profiles are never deleted from client
     }
 
-    // Mood logs — user can only access their own
+    // ── Mood Logs ──────────────────────────────────────────────────────────
+    // Users can only read/write/delete their own logs.
     match /moodLogs/{logId} {
-      allow read, delete: if request.auth != null && request.auth.uid == resource.data.uid;
-      allow create:       if request.auth != null && request.auth.uid == request.resource.data.uid;
+      allow read, delete: if request.auth != null
+                          && request.auth.uid == resource.data.uid;
+      allow create:       if request.auth != null
+                          && request.auth.uid == request.resource.data.uid
+                          && request.resource.data.keys().hasAll(['uid', 'mood', 'timestamp']);
     }
 
-    // Chat history — user can only access their own
+    // ── Chat History ───────────────────────────────────────────────────────
     match /chatHistory/{messageId} {
-      allow read:   if request.auth != null && request.auth.uid == resource.data.uid;
-      allow create: if request.auth != null && request.auth.uid == request.resource.data.uid;
+      allow read, delete: if request.auth != null
+                          && request.auth.uid == resource.data.uid;
+      allow create:       if request.auth != null
+                          && request.auth.uid == request.resource.data.uid;
     }
 
-    // Community posts — must be signed in (anon users allowed to read, registered to post)
+    // ── Community Posts ────────────────────────────────────────────────────
+    // Any signed-in user can read. Only non-anonymous registered users can create.
+    // Any signed-in user can update (for likes / reactions).
     match /communityPosts/{postId} {
       allow read:   if request.auth != null;
-      allow create: if request.auth != null && !request.auth.token.firebase.sign_in_provider.matches('anonymous')
-                       && request.auth.uid == request.resource.data.uid;
-      allow update: if request.auth != null; // likes & replies
+      allow create: if request.auth != null
+                    && request.auth.token.firebase.sign_in_provider != 'anonymous'
+                    && request.auth.uid == request.resource.data.uid;
+      allow update: if request.auth != null; // likes, replies
+      allow delete: if request.auth != null && request.auth.uid == resource.data.uid;
     }
   }
 }

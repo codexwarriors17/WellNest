@@ -1,19 +1,21 @@
 // src/pages/ProfilePage.jsx
-import { useState, useRef } from 'react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
 import { updateUserProfile } from '../firebase/firebaseFunctions'
 import { useFCM } from '../hooks/useFCM'
+import { setReminderEnabled } from '../firebase/firebaseMessaging'
 import BadgeSystem from '../components/badges/BadgeSystem'
 import Button from '../components/Button'
 import toast from 'react-hot-toast'
 import { linkAnonWithEmail, linkAnonWithGoogle } from '../firebase/firebaseFunctions'
+import { exportMoodPDF, exportMoodCSV } from '../services/exportService'
 
 const LANGUAGES = [
-  { code: 'en', label: 'English', native: 'English', flag: '🇬🇧' },
-  { code: 'hi', label: 'Hindi', native: 'हिंदी', flag: '🇮🇳' },
-  { code: 'mr', label: 'Marathi', native: 'मराठी', flag: '🇮🇳' },
-  { code: 'ta', label: 'Tamil', native: 'தமிழ்', flag: '🇮🇳' },
+  { code: 'en', label: 'English',  native: 'English', flag: '🇬🇧' },
+  { code: 'hi', label: 'Hindi',    native: 'हिंदी',    flag: '🇮🇳' },
+  { code: 'mr', label: 'Marathi',  native: 'मराठी',    flag: '🇮🇳' },
+  { code: 'ta', label: 'Tamil',    native: 'தமிழ்',    flag: '🇮🇳' },
 ]
 
 const AVATAR_COLORS = [
@@ -28,17 +30,24 @@ const AVATAR_COLORS = [
 export default function ProfilePage() {
   const { t, i18n } = useTranslation()
   const { user, profile, refreshProfile, isAnonymous } = useAuth()
-  const [tab, setTab] = useState('profile') // 'profile' | 'badges' | 'settings'
+  const [tab, setTab]     = useState('profile')
   const { permission: notifPermission, requestPermission } = useFCM(user?.uid || null)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading]         = useState(false)
+  const [reminderLoading, setReminderLoading] = useState(false)
+  const [exportLoading, setExportLoading] = useState('')
+
+  // Derive reminder state from Firestore profile
+  const reminderOn = profile?.reminderEnabled === true && notifPermission === 'granted'
+
   const [form, setForm] = useState({
     displayName: profile?.displayName || user?.displayName || '',
-    bio: profile?.bio || '',
+    bio:         profile?.bio || '',
     avatarColor: profile?.avatarColor || AVATAR_COLORS[0],
-    language: profile?.language || i18n.language || 'en',
+    language:    profile?.language || i18n.language || 'en',
   })
 
   const update = (field) => (e) => setForm(prev => ({ ...prev, [field]: e.target.value }))
+
   const [upgradeMode, setUpgradeMode]   = useState(false)
   const [upgradeForm, setUpgradeForm]   = useState({ email: '', password: '', name: '' })
   const [upgradeLoading, setUpgradeLoading] = useState(false)
@@ -79,9 +88,9 @@ export default function ProfilePage() {
     try {
       await updateUserProfile(user.uid, {
         displayName: form.displayName.trim(),
-        bio: form.bio.trim(),
+        bio:         form.bio.trim(),
         avatarColor: form.avatarColor,
-        language: form.language,
+        language:    form.language,
       })
       i18n.changeLanguage(form.language)
       await refreshProfile()
@@ -92,38 +101,83 @@ export default function ProfilePage() {
     setLoading(false)
   }
 
-  const handleEnableNotifications = async () => {
+  // ── Daily Reminder Toggle ─────────────────────────────────────────────
+  const handleToggleReminder = async () => {
+    if (!user?.uid) return
+
+    // If notifications are blocked in browser, guide user
     if (notifPermission === 'denied') {
-      toast.error('Notifications blocked in browser. Please allow them in site settings.')
+      toast.error('Notifications are blocked. Please allow them in your browser settings, then try again.')
       return
     }
-    const token = await requestPermission()
-    if (token) toast.success('Notifications enabled! 🔔')
-    else toast.error('Could not enable notifications. Check browser settings.')
+
+    setReminderLoading(true)
+    try {
+      if (reminderOn) {
+        // Turn OFF: delete token from Firestore
+        const ok = await setReminderEnabled(user.uid, false)
+        if (ok) {
+          await refreshProfile()
+          toast.success('Daily reminders turned off.')
+        } else {
+          toast.error('Could not update. Try again.')
+        }
+      } else {
+        // Turn ON: request permission + get token
+        const ok = await setReminderEnabled(user.uid, true)
+        if (ok) {
+          await refreshProfile()
+          toast.success("Daily reminders enabled! 🔔 You'll get a nudge every evening.")
+        } else {
+          toast.error('Could not enable notifications. Check browser settings.')
+        }
+      }
+    } catch {
+      toast.error('Something went wrong. Try again.')
+    }
+    setReminderLoading(false)
   }
 
-  // Compute stats for badges
+  // ── Export ────────────────────────────────────────────────────────────
+  const handleExportPDF = async () => {
+    setExportLoading('pdf')
+    try {
+      const ok = await exportMoodPDF(user.uid, profile?.displayName || 'User', profile?.streak || 0, profile?.totalLogs || 0)
+      if (!ok) toast.error('No mood data to export yet.')
+    } catch { toast.error('Export failed.') }
+    setExportLoading('')
+  }
+
+  const handleExportCSV = async () => {
+    setExportLoading('csv')
+    try {
+      const ok = await exportMoodCSV(user.uid, profile?.displayName || 'User')
+      if (!ok) toast.error('No mood data to export yet.')
+    } catch { toast.error('Export failed.') }
+    setExportLoading('')
+  }
+
+  // Badge stats
   const stats = {
-    totalLogs: profile?.totalLogs || 0,
-    streak: profile?.streak || 0,
-    positiveDays: profile?.positiveDays || 0,
-    loggedAfterBadDay: profile?.loggedAfterBadDay || false,
-    usedBreathing: !!localStorage.getItem('wellnest_used_breathing'),
-    usedJournal: !!(JSON.parse(localStorage.getItem('wellnest_journal') || '[]').length),
+    totalLogs:        profile?.totalLogs || 0,
+    streak:           profile?.streak || 0,
+    positiveDays:     profile?.positiveDays || 0,
+    loggedAfterBadDay:profile?.loggedAfterBadDay || false,
+    usedBreathing:    !!localStorage.getItem('wellnest_used_breathing'),
+    usedJournal:      !!(JSON.parse(localStorage.getItem('wellnest_journal') || '[]').length),
   }
 
   const initials = (form.displayName || 'U').split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
 
   const TABS = [
-    { id: 'profile', label: '👤 Profile' },
-    { id: 'badges', label: '🏆 Badges' },
+    { id: 'profile',  label: '👤 Profile'  },
+    { id: 'badges',   label: '🏆 Badges'   },
     { id: 'settings', label: '⚙️ Settings' },
   ]
 
   return (
     <div className="min-h-screen bg-slate-50 pt-20 pb-10 page-enter">
       <div className="max-w-2xl mx-auto px-4 space-y-6">
-
 
         {/* ── Upgrade Guest Banner ── */}
         {isAnonymous && (
@@ -145,7 +199,6 @@ export default function ProfilePage() {
 
             {upgradeMode && (
               <div className="mt-5 pt-5 border-t border-amber-200 space-y-4 animate-fade-up">
-                {/* Google upgrade */}
                 <button onClick={handleUpgradeGoogle} disabled={googleUpgrading}
                   className="w-full flex items-center justify-center gap-3 bg-white border border-slate-200 text-slate-700 font-semibold py-3 rounded-2xl hover:-translate-y-0.5 hover:shadow-md transition-all text-sm disabled:opacity-50">
                   {googleUpgrading
@@ -183,7 +236,6 @@ export default function ProfilePage() {
 
         {/* Profile header card */}
         <div className="card overflow-hidden p-0">
-          {/* Banner */}
           <div className={`h-24 bg-gradient-to-br ${form.avatarColor}`} />
           <div className="px-6 pb-6">
             <div className="flex items-end gap-4 -mt-10 mb-4">
@@ -192,11 +244,10 @@ export default function ProfilePage() {
               </div>
               <div className="pb-1">
                 <h1 className="font-display text-xl text-slate-800">{profile?.displayName || 'Your Name'}</h1>
-                <p className="text-sm text-slate-500">{user?.email}</p>
+                <p className="text-sm text-slate-500">{user?.email || (isAnonymous ? 'Guest Account' : '')}</p>
               </div>
             </div>
 
-            {/* Stats row */}
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-sky-50 rounded-2xl p-3 text-center">
                 <div className="font-display text-2xl text-sky-600">{profile?.streak || 0}</div>
@@ -219,19 +270,16 @@ export default function ProfilePage() {
         {/* Tabs */}
         <div className="flex gap-1 bg-white rounded-2xl p-1 shadow-card">
           {TABS.map(tb => (
-            <button
-              key={tb.id}
-              onClick={() => setTab(tb.id)}
+            <button key={tb.id} onClick={() => setTab(tb.id)}
               className={`flex-1 py-2 px-3 rounded-xl text-sm font-medium transition-all duration-200 ${
                 tab === tb.id ? 'bg-sky-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
-              }`}
-            >
+              }`}>
               {tb.label}
             </button>
           ))}
         </div>
 
-        {/* Profile tab */}
+        {/* ── Profile tab ── */}
         {tab === 'profile' && (
           <div className="card space-y-5 animate-fade-in">
             <h2 className="font-display text-lg text-slate-800">Edit Profile</h2>
@@ -251,13 +299,10 @@ export default function ProfilePage() {
               <label className="text-sm font-medium text-slate-700 block mb-2">Avatar Color</label>
               <div className="flex gap-2 flex-wrap">
                 {AVATAR_COLORS.map(color => (
-                  <button
-                    key={color}
-                    onClick={() => setForm(prev => ({ ...prev, avatarColor: color }))}
+                  <button key={color} onClick={() => setForm(prev => ({ ...prev, avatarColor: color }))}
                     className={`w-9 h-9 rounded-xl bg-gradient-to-br ${color} transition-all duration-200 ${
                       form.avatarColor === color ? 'ring-2 ring-sky-400 ring-offset-2 scale-110' : 'hover:scale-105'
-                    }`}
-                  />
+                    }`} />
                 ))}
               </div>
             </div>
@@ -266,15 +311,12 @@ export default function ProfilePage() {
               <label className="text-sm font-medium text-slate-700 block mb-2">Language</label>
               <div className="grid grid-cols-2 gap-2">
                 {LANGUAGES.map(lang => (
-                  <button
-                    key={lang.code}
-                    onClick={() => setForm(prev => ({ ...prev, language: lang.code }))}
+                  <button key={lang.code} onClick={() => setForm(prev => ({ ...prev, language: lang.code }))}
                     className={`flex items-center gap-2 p-2.5 rounded-xl border-2 transition-all text-sm ${
                       form.language === lang.code
                         ? 'border-sky-500 bg-sky-50 text-sky-700 font-medium'
                         : 'border-slate-100 hover:border-sky-200 text-slate-600'
-                    }`}
-                  >
+                    }`}>
                     <span>{lang.flag}</span>
                     <span>{lang.native}</span>
                   </button>
@@ -282,65 +324,117 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            <Button onClick={handleSave} loading={loading} className="w-full">
-              Save Changes
-            </Button>
+            <Button onClick={handleSave} loading={loading} className="w-full">Save Changes</Button>
           </div>
         )}
 
-        {/* Badges tab */}
+        {/* ── Badges tab ── */}
         {tab === 'badges' && (
           <div className="card animate-fade-in">
             <BadgeSystem stats={stats} />
           </div>
         )}
 
-        {/* Settings tab */}
+        {/* ── Settings tab ── */}
         {tab === 'settings' && (
           <div className="space-y-4 animate-fade-in">
+
+            {/* Notifications Card */}
             <div className="card space-y-4">
               <h2 className="font-display text-lg text-slate-800">Notifications</h2>
-              <div className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl">
+
+              {/* Daily Reminder Toggle */}
+              <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
                 <div>
                   <div className="font-medium text-slate-700 text-sm">Daily Mood Reminders</div>
-                  <div className="text-xs text-slate-500">Get a gentle nudge every evening</div>
+                  <div className="text-xs text-slate-500 mt-0.5">Get a gentle nudge every evening at 8pm</div>
+                  {notifPermission === 'denied' && (
+                    <div className="text-xs text-rose-500 mt-1 font-medium">⚠️ Blocked in browser settings</div>
+                  )}
                 </div>
-                <Button
-                  variant={notifPermission === 'granted' ? 'ghost' : 'secondary'}
-                  size="sm"
-                  onClick={handleEnableNotifications}
-                  disabled={notifPermission === 'denied'}
+
+                {/* Toggle Switch */}
+                <button
+                  onClick={handleToggleReminder}
+                  disabled={reminderLoading || notifPermission === 'denied'}
+                  className={`relative inline-flex h-7 w-13 items-center rounded-full transition-colors duration-200 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
+                    reminderOn ? 'bg-sky-500' : 'bg-slate-200'
+                  }`}
+                  style={{ width: '52px' }}
+                  aria-label="Toggle daily reminders"
                 >
-                  {notifPermission === 'granted' ? '✅ Enabled' : notifPermission === 'denied' ? '🚫 Blocked' : 'Enable'}
-                </Button>
+                  {reminderLoading ? (
+                    <span className="absolute inset-0 flex items-center justify-center">
+                      <svg className="animate-spin h-3.5 w-3.5 text-white" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                      </svg>
+                    </span>
+                  ) : (
+                    <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200 ${
+                      reminderOn ? 'translate-x-7' : 'translate-x-1'
+                    }`} />
+                  )}
+                </button>
+              </div>
+
+              {/* Status indicator */}
+              <div className={`text-xs px-3 py-2 rounded-xl ${
+                reminderOn ? 'bg-emerald-50 text-emerald-600' :
+                notifPermission === 'denied' ? 'bg-rose-50 text-rose-600' :
+                'bg-slate-50 text-slate-500'
+              }`}>
+                {reminderOn ? '✅ You\'ll receive daily mood reminders at ~8pm IST' :
+                 notifPermission === 'denied' ? '🚫 Enable notifications in browser settings to use this feature' :
+                 '🔕 Daily reminders are off — toggle above to enable'}
               </div>
             </div>
 
+            {/* Data Export Card */}
+            <div className="card space-y-4">
+              <h2 className="font-display text-lg text-slate-800">Export Your Data</h2>
+              <p className="text-xs text-slate-500">Download your mood history to share with your doctor or therapist.</p>
+              <div className="grid grid-cols-2 gap-3">
+                <button onClick={handleExportPDF} disabled={exportLoading === 'pdf'}
+                  className="flex items-center justify-center gap-2 py-3 px-4 rounded-2xl bg-sky-50 border border-sky-100 text-sky-700 font-semibold text-sm hover:bg-sky-100 transition-colors disabled:opacity-50">
+                  {exportLoading === 'pdf'
+                    ? <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                    : '📄'} PDF Report
+                </button>
+                <button onClick={handleExportCSV} disabled={exportLoading === 'csv'}
+                  className="flex items-center justify-center gap-2 py-3 px-4 rounded-2xl bg-emerald-50 border border-emerald-100 text-emerald-700 font-semibold text-sm hover:bg-emerald-100 transition-colors disabled:opacity-50">
+                  {exportLoading === 'csv'
+                    ? <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                    : '📊'} CSV Data
+                </button>
+              </div>
+            </div>
+
+            {/* Privacy Card */}
             <div className="card space-y-4">
               <h2 className="font-display text-lg text-slate-800">Privacy & Data</h2>
               <div className="space-y-3 text-sm text-slate-600">
-                <div className="flex items-start gap-2">
-                  <span className="text-green-500 mt-0.5">✓</span>
-                  <span>Your mood data is private and only visible to you</span>
-                </div>
-                <div className="flex items-start gap-2">
-                  <span className="text-green-500 mt-0.5">✓</span>
-                  <span>Chat conversations are stored securely in Firebase</span>
-                </div>
-                <div className="flex items-start gap-2">
-                  <span className="text-green-500 mt-0.5">✓</span>
-                  <span>We never sell your data to third parties</span>
-                </div>
+                {[
+                  'Your mood data is private and only visible to you',
+                  'Chat conversations are stored securely in Firebase',
+                  'We never sell your data to third parties',
+                ].map((item, i) => (
+                  <div key={i} className="flex items-start gap-2">
+                    <span className="text-green-500 mt-0.5">✓</span>
+                    <span>{item}</span>
+                  </div>
+                ))}
               </div>
             </div>
 
+            {/* Crisis Resources */}
             <div className="card">
               <h2 className="font-display text-lg text-slate-800 mb-3">Crisis Resources</h2>
               <div className="space-y-2">
                 {[
-                  { name: 'iCall', number: '9152987821' },
+                  { name: 'iCall',                 number: '9152987821'    },
                   { name: 'Vandrevala Foundation', number: '1860-2662-345' },
-                  { name: 'Aasra', number: '9820466627' },
+                  { name: 'Aasra',                 number: '9820466627'    },
                 ].map(h => (
                   <a key={h.name} href={`tel:${h.number}`}
                     className="flex justify-between items-center p-3 bg-rose-50 rounded-xl hover:bg-rose-100 transition-colors">
@@ -350,6 +444,7 @@ export default function ProfilePage() {
                 ))}
               </div>
             </div>
+
           </div>
         )}
       </div>
