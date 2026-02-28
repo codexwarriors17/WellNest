@@ -40,15 +40,16 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [analysis, setAnalysis] = useState(null)
   const [chartData, setChartData] = useState([])
+  const [view, setView] = useState('recent') // recent | history | chart
 
   const fetchLogs = async () => {
     if (!user) return
     setLoading(true)
     try {
-      const data = await getUserMoodLogs(30)
+      const data = await getUserMoodLogs(60) // ✅ fetch more for history
       setLogs(data)
       setAnalysis(analyzeMoodTrend(data))
-      setChartData(prepareMoodChartData(data))
+      setChartData(prepareMoodChartData(data, 14)) // ✅ last 14 points for chart
     } catch (err) {
       console.error(err)
     }
@@ -113,16 +114,10 @@ export default function DashboardPage() {
 
             {analysis.alert && (
               <div className="mt-3 flex gap-2 flex-wrap">
-                <a
-                  href="tel:9152987821"
-                  className="text-xs bg-white border rounded-xl px-3 py-1.5 font-medium hover:shadow-sm transition-all"
-                >
+                <a href="tel:9152987821" className="text-xs bg-white border rounded-xl px-3 py-1.5 font-medium hover:shadow-sm transition-all">
                   📞 iCall: 9152987821
                 </a>
-                <a
-                  href="tel:18602662345"
-                  className="text-xs bg-white border rounded-xl px-3 py-1.5 font-medium hover:shadow-sm transition-all"
-                >
+                <a href="tel:18602662345" className="text-xs bg-white border rounded-xl px-3 py-1.5 font-medium hover:shadow-sm transition-all">
                   📞 Vandrevala: 1860-2662-345
                 </a>
               </div>
@@ -136,11 +131,15 @@ export default function DashboardPage() {
             <MoodTracker onMoodSaved={fetchLogs} />
           </div>
 
-          {/* Mood chart */}
+          {/* Mood trend chart */}
           <div className="card">
-            <h2 className="font-display text-lg text-slate-800 mb-4">{t('yourMoodTrend')}</h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-display text-lg text-slate-800">{t('yourMoodTrend')}</h2>
+              <span className="text-xs text-slate-400">Last 14 logs</span>
+            </div>
+
             {chartData.length >= 2 ? (
-              <ResponsiveContainer width="100%" height={200}>
+              <ResponsiveContainer width="100%" height={210}>
                 <LineChart data={chartData}>
                   <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
                   <YAxis domain={[1, 5]} tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={20} />
@@ -164,21 +163,52 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Recent logs */}
+        {/* Toggle */}
+        <div className="flex gap-1 bg-white rounded-2xl p-1 shadow-card w-fit">
+          {[
+            { id: 'recent', label: '📌 Recent' },
+            { id: 'history', label: '📋 History' },
+            { id: 'chart', label: '📊 Chart' },
+          ].map((v) => (
+            <button
+              key={v.id}
+              onClick={() => setView(v.id)}
+              className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
+                view === v.id ? 'bg-sky-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Mood section */}
         <div className="card">
-          <h2 className="font-display text-lg text-slate-800 mb-4">{t('recentLogs')}</h2>
+          <h2 className="font-display text-lg text-slate-800 mb-4">
+            {view === 'recent' ? t('recentLogs') : view === 'history' ? 'Mood History' : 'Mood Chart (last 14)'}
+          </h2>
+
           {loading ? (
-            <div className="flex justify-center py-8">
+            <div className="flex justify-center py-10">
               <div className="w-6 h-6 border-2 border-sky-300 border-t-sky-600 rounded-full animate-spin" />
             </div>
           ) : logs.length === 0 ? (
-            <div className="text-center py-8">
+            <div className="text-center py-10">
               <div className="text-4xl mb-2">🌱</div>
               <p className="text-slate-500 text-sm">{t('noLogsYet')}</p>
             </div>
+          ) : view === 'chart' ? (
+            <ResponsiveContainer width="100%" height={260}>
+              <LineChart data={chartData}>
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                <YAxis domain={[1, 5]} tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={20} />
+                <Tooltip content={<CustomTooltip />} />
+                <Line type="monotone" dataKey="value" stroke="#0ea5e9" strokeWidth={2.5} dot={{ r: 4 }} />
+              </LineChart>
+            </ResponsiveContainer>
           ) : (
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {logs.slice(0, 10).map((log) => (
+            <div className="space-y-2 max-h-80 overflow-y-auto">
+              {(view === 'recent' ? logs.slice(0, 10) : logs).map((log) => (
                 <div
                   key={log.id}
                   className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 transition-colors"
@@ -212,59 +242,7 @@ export default function DashboardPage() {
             <QuickAction emoji="🎵" title="Meditate" desc="Calm your mind" to="/selfhelp?tab=meditate" color="bg-cyan-50" />
           </div>
         </div>
-
-        {/* Export buttons */}
-        <div className="card">
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <div>
-              <h2 className="font-display text-lg text-slate-800">Export Your Data</h2>
-              <p className="text-xs text-slate-500 mt-0.5">Download your mood history for personal records</p>
-            </div>
-            <div className="flex gap-2">
-              <ExportButton uid={user?.uid} profile={profile} />
-            </div>
-          </div>
-        </div>
       </div>
     </div>
-  )
-}
-
-// Export component
-function ExportButton({ uid, profile }) {
-  const [loading, setLoading] = useState(false)
-
-  const handleExport = async (type) => {
-    if (!uid) return
-    setLoading(type)
-    try {
-      const { exportMoodCSV, exportMoodPDF } = await import('../services/exportService')
-      const name = profile?.displayName || 'User'
-      if (type === 'csv') await exportMoodCSV(uid, name)
-      else await exportMoodPDF(uid, name, profile?.streak || 0, profile?.totalLogs || 0)
-    } catch (e) {
-      console.error(e)
-    }
-    setLoading(false)
-  }
-
-  return (
-    <>
-      <button
-        onClick={() => handleExport('csv')}
-        disabled={!!loading}
-        className="btn-secondary text-sm py-2 px-4"
-      >
-        {loading === 'csv' ? '...' : '📊 CSV'}
-      </button>
-
-      <button
-        onClick={() => handleExport('pdf')}
-        disabled={!!loading}
-        className="btn-primary text-sm py-2 px-4"
-      >
-        {loading === 'pdf' ? '...' : '📄 PDF Report'}
-      </button>
-    </>
   )
 }
