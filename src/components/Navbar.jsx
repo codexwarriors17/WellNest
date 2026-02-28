@@ -3,32 +3,31 @@ import { useState, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../context/AuthContext'
-import { logout } from '../firebase/firebaseFunctions'
 import toast from 'react-hot-toast'
 
 const LANGUAGES = [
   { code: 'en', label: 'EN', native: 'English' },
   { code: 'hi', label: 'हि', native: 'हिंदी' },
-  { code: 'mr', label: 'म', native: 'मराठी' },
-  { code: 'ta', label: 'த', native: 'தமிழ்' },
+  { code: 'mr', label: 'म',  native: 'मराठी'  },
+  { code: 'ta', label: 'த',  native: 'தமிழ்'  },
 ]
 
 const NAV_ITEMS = [
-  { path: '/dashboard', label: 'Dashboard', icon: '⊞' },
-  { path: '/mood', label: 'Mood', icon: '◑' },
-  { path: '/selfhelp', label: 'Self-Help', icon: '◎' },
-  { path: '/chat', label: 'Chat', icon: '◉' },
-  { path: '/community', label: 'Community', icon: '◈' },
+  { path: '/dashboard', label: 'Dashboard',  icon: '⊞' },
+  { path: '/mood',      label: 'Mood',        icon: '◑' },
+  { path: '/selfhelp',  label: 'Self-Help',   icon: '◎' },
+  { path: '/chat',      label: 'Chat',        icon: '◉' },
+  { path: '/community', label: 'Community',   icon: '◈' },
 ]
 
 export default function Navbar() {
-  const { t, i18n } = useTranslation()
-  const { user, profile, isAnonymous } = useAuth()
-  const location = useLocation()
-  const navigate = useNavigate()
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [langOpen, setLangOpen] = useState(false)
-  const [scrolled, setScrolled] = useState(false)
+  const { t, i18n }                          = useTranslation()
+  const { user, profile, isAnonymous, logout } = useAuth() // ✅ use AuthContext logout (handles FCM cleanup)
+  const location                             = useLocation()
+  const navigate                             = useNavigate()
+  const [menuOpen, setMenuOpen]              = useState(false)
+  const [langOpen, setLangOpen]              = useState(false)
+  const [scrolled, setScrolled]              = useState(false)
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20)
@@ -39,7 +38,7 @@ export default function Navbar() {
   useEffect(() => { setMenuOpen(false) }, [location.pathname])
 
   const handleLogout = async () => {
-    await logout()
+    await logout()  // ✅ deletes FCM token, then signs out
     toast.success('Signed out. Take care! 🌿')
     navigate('/')
   }

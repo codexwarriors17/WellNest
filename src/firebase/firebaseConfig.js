@@ -1,37 +1,57 @@
 // src/firebase/firebaseConfig.js
-import { initializeApp } from 'firebase/app'
+import { initializeApp, getApps, getApp } from 'firebase/app'
 import { getAuth } from 'firebase/auth'
 import {
   initializeFirestore,
   persistentLocalCache,
   persistentMultipleTabManager,
+  getFirestore,
 } from 'firebase/firestore'
 import { getMessaging, isSupported } from 'firebase/messaging'
 import { getFunctions } from 'firebase/functions'
 
 const firebaseConfig = {
-  apiKey:            import.meta.env.VITE_FIREBASE_API_KEY             || "AIzaSyAEHEJpSd4nfs4eIUXZzX97pv4QN-RnJxQ",
-  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN         || "wellnest-7803a.firebaseapp.com",
-  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID          || "wellnest-7803a",
-  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET      || "wellnest-7803a.firebasestorage.app",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "215863511352",
-  appId:             import.meta.env.VITE_FIREBASE_APP_ID              || "1:215863511352:web:323efeca132faa7ea919cd",
+  apiKey:            import.meta.env.VITE_FIREBASE_API_KEY             || 'AIzaSyAEHEJpSd4nfs4eIUXZzX97pv4QN-RnJxQ',
+  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN         || 'wellnest-7803a.firebaseapp.com',
+  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID          || 'wellnest-7803a',
+  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET      || 'wellnest-7803a.firebasestorage.app',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '215863511352',
+  appId:             import.meta.env.VITE_FIREBASE_APP_ID              || '1:215863511352:web:323efeca132faa7ea919cd',
 }
 
-const app = initializeApp(firebaseConfig)
+// ── Guard: prevent "Firebase app already exists" on hot-reload ───────────────
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig)
 
 export const auth = getAuth(app)
 
-// Modern Firestore v10 offline persistence (replaces deprecated enableIndexedDbPersistence)
-export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager(),
-  }),
-})
+// ── Firestore with offline persistence ───────────────────────────────────────
+// initializeFirestore can only be called once; fall back to getFirestore on HMR
+let _db
+try {
+  _db = initializeFirestore(app, {
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager(),
+    }),
+  })
+} catch {
+  // Already initialized (Vite HMR fast-refresh scenario)
+  _db = getFirestore(app)
+}
+export const db = _db
 
 export const functions = getFunctions(app)
 
-// Singleton — reuses same messaging instance instead of recreating on every call
+// ── VAPID key guard ───────────────────────────────────────────────────────────
+export const VAPID_KEY = import.meta.env.VITE_FIREBASE_VAPID_KEY
+if (!VAPID_KEY) {
+  console.warn(
+    '[WellNest] ⚠️  VITE_FIREBASE_VAPID_KEY is not set. ' +
+    'FCM push notifications will not work. ' +
+    'Add it to your .env file. See README for instructions.'
+  )
+}
+
+// ── Messaging singleton ───────────────────────────────────────────────────────
 let _messagingInstance = null
 export const getMessagingInstance = async () => {
   if (_messagingInstance) return _messagingInstance
@@ -41,8 +61,9 @@ export const getMessagingInstance = async () => {
       _messagingInstance = getMessaging(app)
       return _messagingInstance
     }
+    console.info('[WellNest] FCM not supported in this browser (no SW support).')
   } catch (e) {
-    console.warn('Firebase Messaging not supported:', e.message)
+    console.warn('[WellNest] Firebase Messaging init error:', e.message)
   }
   return null
 }
